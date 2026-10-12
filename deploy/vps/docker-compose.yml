@@ -1,0 +1,91 @@
+# TournamentLive streaming infra — VPS deployment overlay.
+# Linux target. Unlike the local MVP this:
+#   * does NOT expose MediaMTX's API (9997) or player (8888) directly to the
+#     internet — they are reachable only on the internal compose network and
+#     fronted by Caddy with TLS + BasicAuth.
+#   * exposes only what must be public: 1935 (RTMP ingest from phones) and 443.
+#   * runs the fallback supervisor as its own container so it can be restarted
+#     independently and does not depend on a Windows host.
+#
+# Bring up:  docker compose -f docker-compose.yml up -d
+# Bring down: docker compose -f docker-compose.yml down
+# After first start generate the Caddy basic-auth hash and paste it into .env.
+
+name: tournamentlive-infra
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: tl-mediamtx
+    restart: unless-stopped
+    # Only RTMP ingest is published to the host. HLS/API stay internal,
+    # reached via Caddy. This is the single most important hardening change
+    # vs the local MVP.
+    ports:
+      - "1935:1935/tcp"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./data/recordings:/var/recordings
+      - ./fallback:/fallback:ro
+    networks: [tl]
+
+  supervisor:
+    # Feeds broadcast/<x> = live tatami/<x> when the phone is up, else loops
+    # the fallback clip. Keeps the outbound publication alive across input loss.
+    build: ./supervisor
+    image: tl-supervisor:local
+    container_name: tl-supervisor
+    restart: unless-stopped
+    depends_on: [mediamtx]
+    environment:
+      MEDIAMTX_HOST: "mediamtx"        # internal service name
+      MTX_ADMIN_USER: "${MTX_ADMIN_USER:-admin}"
+      MTX_ADMIN_PASSWORD: "${MTX_ADMIN_PASSWORD:-admin_password_CHANGE_ME}"
+      TATAMIS: "a b c d e f g h"
+      FALLBACK_DIR: "/fallback"
+      OUTPUTS_PATH: "/outputs/outputs.local.conf"
+    volumes:
+      - ./fallback:/fallback:ro
+      # The cockpit edits platform keys here via the /ctl/outputs API; the
+      # supervisor's control server writes this file (read-write).
+      - ./outputs:/outputs:rw
+    networks: [tl]
+
+  relayer:
+    # Layer 2.5: republishes each broadcast/<x> OUT to VK/YouTube per
+    # outputs/outputs.local.conf. Hot-reloads the file every 3s (no restart).
+    build: ../../relay
+    image: tl-relayer:local
+    container_name: tl-relayer
+    restart: unless-stopped
+    depends_on: [mediamtx, supervisor]
+    environment:
+      MEDIAMTX_HOST: mediamtx
+    volumes:
+      - ./outputs:/outputs:ro
+    networks: [tl]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: tl-caddy
+    restart: unless-stopped
+    depends_on: [mediamtx]
+    ports:
+      - "80:80"        # HTTP -> redirected to HTTPS by Caddy
+      - "443:443"      # TLS panel + preview
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../panel/index.html:/srv/panel/index.html:ro
+      - ./panel/config.js:/srv/panel/config.js:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [tl]
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  tl:
+    driver: bridge

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TournamentLive — Cockpit</title>
+  <!-- Optional deployment overrides (e.g. window.TL.playerOrigin on VPS). -->
+  <!-- Served same-origin; harmless 404 locally where the file is absent. -->
+  <script src="/config.js"></script>
+  <style>
+    :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --txt:#e6e9ef; --muted:#8b94a7; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--txt); font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif; }
+    header { display:flex; align-items:center; gap:16px; padding:16px 22px; border-bottom:1px solid var(--line); }
+    header h1 { font-size:18px; margin:0; font-weight:650; }
+    header .sub { color:var(--muted); font-size:13px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(360px,1fr)); gap:16px; padding:20px 22px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    .card .top { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; }
+    .card .name { font-weight:650; font-size:15px; }
+    .badges { display:flex; gap:8px; }
+    .badge { font-size:11px; font-weight:700; letter-spacing:.4px; padding:4px 9px; border-radius:999px; text-transform:uppercase; }
+    .live { background:#12351b; color:#4ade80; border:1px solid #1f5c2c; }
+    .fallback { background:#3a2a10; color:#fbbf24; border:1px solid #6b4a15; }
+    .offline { background:#3a1414; color:#f87171; border:1px solid #6b2020; }
+    .preview { position:relative; aspect-ratio:16/9; background:#000; }
+    .preview iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+    .preview .ph { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:13px; }
+    .btn { margin:10px 14px 14px; display:inline-block; background:#22272f; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; text-decoration:none; }
+    .btn:hover { background:#2b323d; }
+    .btn.ctl-end { color:#f87171; border-color:#6b2020; }
+    .btn.ctl-resume { color:#4ade80; border-color:#1f5c2c; }
+    .btn[aria-disabled="true"] { opacity:.3; pointer-events:none; }
+    .meta { color:var(--muted); font-size:12px; padding:0 14px 10px; }
+    .out { display:flex; gap:10px; align-items:center; padding:2px 14px 12px; font-size:12px; color:var(--muted); }
+    /* Platform outputs editor (VK/YouTube keys) */
+    .outputs { margin:4px 22px; border:1px solid var(--line); border-radius:12px; background:var(--card); padding:14px 16px; }
+    .outputs h2 { font-size:14px; margin:0 0 4px; font-weight:650; }
+    .outputs .hint { color:var(--muted); font-size:12px; margin:0 0 12px; }
+    .ow { display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+    .ow .lab { width:80px; font-weight:650; font-size:13px; }
+    .ow select, .ow input { background:#0f1115; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:13px; }
+    .ow input.dest { flex:1; min-width:220px; }
+    .ow .en { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); }
+    .ow .status { font-size:11px; color:var(--muted); width:96px; text-align:right; }
+    .save { margin-top:12px; background:#1f6feb; color:#fff; border:0; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; }
+    .save:hover { background:#2b7bff; }
+    .msg { margin-left:12px; font-size:12px; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TournamentLive — Cockpit</h1>
+    <span class="sub">Вход телефона (tatami) → выход на площадки (broadcast). Обновление каждые 2 сек.</span>
+  </header>
+  <div class="outputs">
+    <h2>🔌 Площадки (куда ретранслируем)</h2>
+    <p class="hint">Ключи площадок живут на сервере — НЕ в приложении и НЕ в QR. Вставь новый ключ VK/YouTube сюда, он применится автоматически (~3 сек), без перезапуска и без PowerShell.</p>
+    <div id="ows"></div>
+    <button class="save" id="saveOut">Сохранить площадки</button>
+    <span class="msg" id="outMsg"></span>
+  </div>
+  <div class="grid" id="grid"></div>
+
+  <script>
+    const TATAMIS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const grid = document.getElementById('grid');
+
+    // Build card skeleton once.
+    TATAMIS.forEach((t) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.id = 'card-' + t;
+      card.innerHTML = `
+        <div class="top">
+          <div class="name">TATAMI ${t.toUpperCase()}</div>
+          <div class="badges">
+            <span class="badge" id="in-${t}">…</span>
+            <span class="badge" id="out-${t}">…</span>
+          </div>
+        </div>
+        <div class="preview">
+          <div class="ph" id="ph-${t}">Предпросмотр выключен для экономии CPU</div>
+        </div>
+        <div class="out">Выход (то, что видят VK/YouTube): <b id="mode-${t}" style="color:var(--txt)">…</b></div>
+        <div class="meta" id="meta-${t}">разрешение: — · входящий: — Мбит/с</div>
+        <a class="btn" id="pv-${t}" href="#">Показать живое видео</a>
+        <a class="btn" id="op-${t}" href="#" target="_blank">Открыть в новой вкладке</a>
+        <a class="btn ctl-end" id="end-${t}" href="#" title="Штатно завершить: VK покажет «трансляция окончена»">Завершить</a>
+        <a class="btn ctl-resume" id="res-${t}" href="#" title="Снова держать выход (live/заставка)">Возобновить</a>
+      `;
+      grid.appendChild(card);
+      document.getElementById('end-' + t).onclick = (e) => { e.preventDefault(); ctl('end', t); };
+      document.getElementById('res-' + t).onclick = (e) => { e.preventDefault(); ctl('resume', t); };
+    });
+
+    function setBadge(el, cls, txt) { el.className = 'badge ' + cls; el.textContent = txt; }
+
+    async function tick() {
+      let data;
+      try {
+        const r = await fetch('/v3/paths/list', { cache: 'no-store' });
+        data = (await r.json()).items;
+      } catch (e) {
+        TATAMIS.forEach((t) => setBadge(document.getElementById('in-' + t), 'offline', 'API DOWN'));
+        return;
+      }
+      const byName = {};
+      data.forEach((it) => (byName[it.name] = it));
+
+      let ctlstate = {};
+      try { ctlstate = await (await fetch('/ctl/state', { cache: 'no-store' })).json(); } catch (e) {}
+
+      TATAMIS.forEach((t) => {
+        const inp = byName['tatami/' + t];
+        const out = byName['broadcast/' + t];
+        const inOnline = inp && inp.online;
+        const outOnline = out && out.online;
+        const ended = ctlstate[t] === 'ended';
+
+        // Input badge
+        const inB = document.getElementById('in-' + t);
+        if (inOnline) setBadge(inB, 'live', 'Вход LIVE');
+        else setBadge(inB, 'offline', 'Вход OFF');
+
+        // Output badge (what platforms actually receive)
+        const outB = document.getElementById('out-' + t);
+        const modeEl = document.getElementById('mode-' + t);
+        if (ended) { setBadge(outB, 'offline', 'ЗАВЕРШЕНО'); modeEl.textContent = 'ЗАВЕРШЕНО (штатно, оператор)'; }
+        else if (outOnline && inOnline) { setBadge(outB, 'live', 'Выход LIVE'); modeEl.textContent = 'LIVE (живое видео)'; }
+        else if (outOnline && !inOnline) { setBadge(outB, 'fallback', 'Выход FALLBACK'); modeEl.textContent = 'FALLBACK (заставка)'; }
+        else { setBadge(outB, 'offline', 'Выход OFF'); modeEl.textContent = 'OFFLINE'; }
+
+        // Operator control buttons: enable the relevant one for the current intent.
+        document.getElementById('end-' + t).setAttribute('aria-disabled', ended ? 'true' : 'false');
+        document.getElementById('res-' + t).setAttribute('aria-disabled', ended ? 'false' : 'true');
+
+        // Resolution / bitrate meta from input when live
+        const meta = document.getElementById('meta-' + t);
+        if (inOnline && inp.tracks2) {
+          const v = inp.tracks2.find((x) => x.codec === 'H264' || x.codec === 'VP9' || x.codec === 'AV1');
+          const res = v && v.codecProps ? v.codecProps.width + 'x' + v.codecProps.height : '—';
+          const mbps = (inp.bytesReceived / 1e6).toFixed(1); // cumulative MB as rough indicator
+          meta.textContent = `разрешение: ${res} · принято: ${mbps} МБ`;
+        } else {
+          meta.textContent = 'разрешение: — · принято: —';
+        }
+
+        // Preview / open links point at the MediaMTX player for the OUTPUT path.
+        // Locally this is :8888 on the same host. On a VPS set window.TL.playerOrigin
+        // (e.g. https://preview.example.com) in panel config.js so the built-in player
+        // keeps its absolute-root asset URLs working (no fragile subpath proxying).
+        const pv = document.getElementById('pv-' + t);
+        const op = document.getElementById('op-' + t);
+        const PLAYER_ORIGIN = (window.TL && window.TL.playerOrigin)
+          || (location.protocol + '//' + location.hostname + ':8888');
+        const playerUrl = PLAYER_ORIGIN + '/broadcast/' + t;
+        op.href = playerUrl;
+        pv.onclick = (e) => {
+          e.preventDefault();
+          const prev = document.getElementById('ph-' + t);
+          if (prev) prev.remove();
+          pv.remove();
+          const f = document.createElement('iframe');
+          f.src = playerUrl;
+          document.getElementById('card-' + t).querySelector('.preview').appendChild(f);
+        };
+      });
+    }
+
+    tick();
+    setInterval(tick, 2000);
+
+    // ---- Platform outputs editor (VK/YouTube keys), served by /ctl/outputs ----
+    const PLATFORMS = {
+      vk:     { name: 'VK Video', base: 'rtmp://ovsu.okcdn.ru/input/' },
+      yt:     { name: 'YouTube',  base: 'rtmp://a.rtmp.youtube.com/live2/' },
+      custom: { name: 'Другая (полный URL)', base: null }
+    };
+    let OUT_ITEMS = {};
+
+    function destToPlatform(dest) {
+      for (const k of ['vk', 'yt']) {
+        const b = PLATFORMS[k].base;
+        if (dest && dest.startsWith(b)) return { plat: k, val: dest.slice(b.length) };
+      }
+      return { plat: dest ? 'custom' : 'vk', val: dest || '' };
+    }
+    function composeDest(plat, val) {
+      val = (val || '').trim();
+      if (!val) return '';
+      return plat === 'custom' ? val : PLATFORMS[plat].base + val;
+    }
+
+    async function loadOutputs() {
+      try {
+        const r = await fetch('/ctl/outputs', { cache: 'no-store' });
+        const data = await r.json();
+        OUT_ITEMS = {};
+        (data.items || []).forEach((it) => (OUT_ITEMS[it.tatami] = it));
+      } catch (e) { OUT_ITEMS = {}; }
+      renderOutputs();
+    }
+
+    function renderOutputs() {
+      const box = document.getElementById('ows'); if (!box) return;
+      box.innerHTML = '';
+      TATAMIS.forEach((t) => {
+        const it = OUT_ITEMS[t] || { dest: '', enabled: false };
+        const map = destToPlatform(it.dest);
+        const status = it.enabled ? 'активно' : (it.dest ? 'выключено' : 'не задано');
+        const opts = Object.entries(PLATFORMS)
+          .map(([k, v]) => `<option value="${k}"${k === map.plat ? ' selected' : ''}>${v.name}</option>`).join('');
+        const row = document.createElement('div');
+        row.className = 'ow';
+        row.innerHTML =
+          `<span class="lab">TATAMI ${t.toUpperCase()}</span>` +
+          `<select id="op-plat-${t}">${opts}</select>` +
+          `<input class="dest" id="op-val-${t}" placeholder="${map.plat === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)'}" value="${(map.val || '').replace(/"/g, '&quot;')}">` +
+          `<label class="en"><input type="checkbox" id="op-en-${t}"${it.enabled ? ' checked' : ''}> вкл</label>` +
+          `<span class="status">${status}</span>`;
+        const sel = row.querySelector('#op-plat-' + t), inp = row.querySelector('#op-val-' + t);
+        sel.onchange = () => { inp.placeholder = sel.value === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)'; };
+        box.appendChild(row);
+      });
+    }
+
+    async function saveOutputs() {
+      const msg = document.getElementById('outMsg'); msg.textContent = 'сохраняю…';
+      const items = TATAMIS.map((t) => ({
+        tatami: t,
+        dest: composeDest(document.getElementById('op-plat-' + t).value, document.getElementById('op-val-' + t).value),
+        enabled: document.getElementById('op-en-' + t).checked
+      }));
+      try {
+        const r = await fetch('/ctl/outputs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+        const data = await r.json();
+        OUT_ITEMS = {};
+        (data.items || []).forEach((it) => (OUT_ITEMS[it.tatami] = it));
+        renderOutputs();
+        msg.textContent = '✓ сохранено — реле применит ~3 сек';
+        setTimeout(() => (msg.textContent = ''), 6000);
+      } catch (e) { msg.textContent = '✗ ошибка сохранения'; }
+    }
+
+    document.getElementById('saveOut').onclick = saveOutputs;
+    loadOutputs();
+
+    // Call the supervisor control server (proxied at /ctl/) to end/resume a tatami.
+    async function ctl(action, t) {
+      try {
+        await fetch('/ctl/' + action + '/' + t, { method: 'POST', cache: 'no-store' });
+        tick();
+      } catch (e) { /* panel will show API DOWN badge on next tick if server is unreachable */ }
+    }
+  </script>
+</body>
+</html>

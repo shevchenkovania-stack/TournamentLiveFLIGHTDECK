@@ -1,0 +1,80 @@
+# MediaMTX — VPS configuration (hardened vs the local MVP). Tested against v1.21.
+#
+# Key differences from the local file:
+#   * Only RTMP (1935) is published to the host by docker-compose. HLS (8888) and
+#     the control API (9997) stay on the internal Docker network and are reached
+#     exclusively through Caddy, which enforces TLS + BasicAuth. So the operator
+#     facing surface is authenticated at the reverse proxy.
+#   * Anonymous permissions are narrowed to PUBLISH on the media paths only.
+#     Ingest is protected by (a) unguessable per-tatami stream keys and
+#     (b) firewalling 1935 to the competition/phone egress IPs. See README.
+#   * hlsAlwaysRemux is off: HLS is generated on demand per viewer (cheaper).
+
+logLevel: info
+logDestinations: [stdout]
+
+rtmp: yes
+rtmpAddress: :1935
+
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: no
+hlsSegmentDuration: 1s
+hlsAllowOrigins: ['*']
+
+webrtc: no
+
+api: yes
+apiAddress: :9997
+
+# --- Authentication -----------------------------------------------------------
+# Security model here is NOT this list (it stays broad on purpose): ports 8888
+# and 9997 are never published to the host (see docker-compose.yml), so they are
+# reachable only from the internal Docker network, and the sole public door to
+# them is Caddy, which enforces TLS + BasicAuth. MediaMTX therefore grants the
+# anonymous user the actions Caddy's proxies need (publish/read/playback/api).
+# Ingest is protected by unguessable per-tatami keys + firewalling 1935 (README §3).
+authMethod: internal
+authInternalUsers:
+  - user: any
+    ips: []
+    permissions:
+      - action: read
+      - action: publish
+      - action: playback
+      - action: api
+  # Admin kept for direct operational/API access from within the network.
+  # CHANGE admin_password before use (keep in sync with .env MTX_ADMIN_PASSWORD).
+  - user: admin
+    password: admin_password_CHANGE_ME
+    ips: []
+    permissions:
+      - action: read
+      - action: publish
+      - action: playback
+      - action: api
+
+# --- Recording (input side only) ---------------------------------------------
+pathDefaults:
+  record: no
+
+paths:
+  # 8 independent tatami inputs (reserved capacity). Replace with your real keys, e.g. tatami/A7f3kQ.
+  tatami/a: { source: publisher, record: yes }
+  tatami/b: { source: publisher, record: yes }
+  tatami/c: { source: publisher, record: yes }
+  tatami/d: { source: publisher, record: yes }
+  tatami/e: { source: publisher, record: yes }
+  tatami/f: { source: publisher, record: yes }
+  tatami/g: { source: publisher, record: yes }
+  tatami/h: { source: publisher, record: yes }
+
+  # Output paths fed by the supervisor (live or fallback). Platforms read these.
+  broadcast/a: { source: publisher, record: no }
+  broadcast/b: { source: publisher, record: no }
+  broadcast/c: { source: publisher, record: no }
+  broadcast/d: { source: publisher, record: no }
+  broadcast/e: { source: publisher, record: no }
+  broadcast/f: { source: publisher, record: no }
+  broadcast/g: { source: publisher, record: no }
+  broadcast/h: { source: publisher, record: no }

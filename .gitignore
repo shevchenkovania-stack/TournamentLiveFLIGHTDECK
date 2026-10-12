@@ -1,0 +1,19 @@
+# Runtime artifacts - never commit
+data/recordings/
+logs/
+*.log
+*.paused
+probe*.json
+*probe*.json
+apiprobe.json
+control/
+
+# Generated fallback clips (regenerate via scripts/gen-fallback.ps1)
+fallback/*.mp4
+
+# Live platform RTMP URLs/keys - never commit. Keep real values in outputs.local.conf
+# (the `*` also covers temporary renames like outputs.local.conf.paused)
+outputs/outputs.local.conf*
+outputs/*.paused
+deploy/vps/outputs/outputs.local.conf*
+deploy/vps/outputs/*.paused

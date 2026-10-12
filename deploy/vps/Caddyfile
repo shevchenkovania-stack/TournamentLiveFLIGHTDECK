@@ -1,0 +1,57 @@
+{
+	# Disable the Caddy admin API; we configure only via this file.
+	admin off
+	# Automatic HTTPS via Let's Encrypt once the DNS A records point at this box.
+	email ops@example.com
+}
+
+# ---- Control cockpit (authenticated) ----
+panel.example.com {
+	encode zstd gzip
+
+	# BasicAuth guards the operator UI and the MediaMTX control API proxy.
+	# Generate the hash with:  docker compose run --rm caddy caddy hash-password
+	# then put the result in .env as PANEL_HASH (bcrypt).
+	basic_auth {
+		operator {$PANEL_HASH}
+	}
+
+	# MediaMTX control API on the same origin (the cockpit fetches /v3/paths/list).
+	handle_path /v3/* {
+		reverse_proxy mediamtx:9997
+	}
+
+	# Operator control (cockpit END/RESUME + platform-key editor) -> supervisor.
+	# /ctl/outputs, /ctl/end/<x> -> http://supervisor:8090/...
+	# Guarded by the site's BasicAuth, so keys never leave an authenticated origin.
+	handle_path /ctl/* {
+		reverse_proxy supervisor:8090
+	}
+
+	# Static cockpit.
+	handle {
+		root * /srv/panel
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output stdout
+	}
+}
+
+# ---- Live preview (read-only, no control) ----
+# Left unauthenticated on purpose: viewing links carry no control power. If you
+# need it private, add basic_auth here, but note browsers may not prompt inside
+# the cockpit's iframe — use a signed/tokened path in that case.
+preview.example.com {
+	header {
+		Cross-Origin-Resource-Policy cross-origin
+		# Allow the cockpit (other subdomain) to embed this player.
+		Content-Security-Policy "frame-ancestors 'self' https://panel.example.com"
+	}
+	reverse_proxy mediamtx:8888
+	log {
+		output stdout
+	}
+}

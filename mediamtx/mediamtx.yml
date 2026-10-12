@@ -1,0 +1,94 @@
+# MediaMTX configuration for TournamentLive local streaming MVP (tested v1.21.2)
+# Role: ingest 8 independent RTMP inputs (one per tatami), expose HLS preview,
+# run HTTP API for the control panel, and record incoming streams to disk.
+
+# --- Global ---
+logLevel: info
+logDestinations: [stdout]
+
+# RTMP ingest (phones push here)
+rtmp: yes
+rtmpAddress: :1935
+
+# HLS playback (browser preview + panel thumbnails)
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: yes
+hlsAllowOrigins: ['*']
+
+# WebRTC disabled in local MVP (unreliable ICE under Docker/Windows). HLS is used.
+webrtc: no
+
+# HTTP API (used by the control panel to read per-path status)
+api: yes
+apiAddress: :9997
+
+# --- Local MVP auth ---
+# v1.21 enables internal auth by default which returns 401 on the API.
+# For the local MVP we open read/publish/api to anonymous.
+# On VPS this MUST be replaced by real authentication + TLS (see Stage E).
+authMethod: internal
+authInternalUsers:
+  - user: any
+    ips: []
+    permissions:
+      - action: read
+      - action: publish
+      - action: playback
+      - action: api
+
+# --- Per-path defaults: recording of incoming streams ---
+pathDefaults:
+  record: yes
+  recordPath: /var/recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordSegmentDuration: 60s
+  recordDeleteAfter: 24h
+
+# --- Paths: 8 independent tatami inputs (reserved capacity) ---
+# Phone pushes rtmp://<server>:1935/tatami/<a|b|c|d|e|f|g|h>
+paths:
+  tatami/a:
+    source: publisher
+  tatami/b:
+    source: publisher
+  tatami/c:
+    source: publisher
+  tatami/d:
+    source: publisher
+  tatami/e:
+    source: publisher
+  tatami/f:
+    source: publisher
+  tatami/g:
+    source: publisher
+  tatami/h:
+    source: publisher
+
+  # Output paths: always fed by the supervisor (live when phone is up, fallback
+  # loop when it is down). Platforms (VK/YouTube) and the dashboard preview read
+  # these. Recording disabled here to avoid double-recording the same content.
+  broadcast/a:
+    source: publisher
+    record: no
+  broadcast/b:
+    source: publisher
+    record: no
+  broadcast/c:
+    source: publisher
+    record: no
+  broadcast/d:
+    source: publisher
+    record: no
+  broadcast/e:
+    source: publisher
+    record: no
+  broadcast/f:
+    source: publisher
+    record: no
+  broadcast/g:
+    source: publisher
+    record: no
+  broadcast/h:
+    source: publisher
+    record: no
