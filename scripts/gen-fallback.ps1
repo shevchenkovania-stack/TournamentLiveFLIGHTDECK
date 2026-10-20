@@ -1,50 +1,99 @@
-# Generates looping fallback MP4s, one per tatami, used when a phone's live stream
-# drops WITHOUT a graceful stop (unplanned interruption). This is what the audience
-# sees on the platform (VK/YouTube) until the phone reconnects.
+﻿# Generates looping fallback MP4s (stop-cards), one per tatami — what the audience
+# sees on the platform (VK/YouTube) while a phone's stream is down.
 #
-# Style: a bright, ANIMATED test card (ffmpeg "testsrc2") tinted to a distinct hue
-# per tatami, with a big tatami label + a "connection recovering" subtitle so it is
-# obviously a technical pause and not a dead stream.
+# Frame 1920x1080, brand background: fallback/banner_background.png
+#   (the quiet zone x<1000 / y<820 is reserved for the text — do not put anything there).
 #
-# Usage: powershell -ExecutionPolicy Bypass -File gen-fallback.ps1
+# Text block (quiet zone): start (20,20), font 50px, line step 60px, color #0064FF
+# (RGB 0,100,255, arial). Lines: ID, Port, Ver, Platform, Mode, up to 5 "IP:" lines,
+# then the message.
+#
+# Optional poster (case 2): contain-scaled into the right box x 1000..1900,
+# y 100..980 — it never overlaps the text. poster='' (case 1) = background + text only.
+#
+# $defs holds the per-tatami card values (currently placeholder defaults:
+# ID = tatami letter, Port = 1935, Ver = 2.0.4, Mode = "ручной", IP empty).
+# Fill in real values before the event.
+#
+# Usage:  powershell -ExecutionPolicy Bypass -File scripts/gen-fallback.ps1
+# Contract: tournament-live docs/15-banner-manager.md, section "Подложка стоп-баннера".
+
+$ErrorActionPreference = 'Stop'
 
 $defs = @(
-    @{ p = 'a'; label = 'TATAMI A'; hue = 0 },
-    @{ p = 'b'; label = 'TATAMI B'; hue = 72 },
-    @{ p = 'c'; label = 'TATAMI C'; hue = 144 },
-    @{ p = 'd'; label = 'TATAMI D'; hue = 216 },
-    @{ p = 'e'; label = 'TATAMI E'; hue = 288 },
-    @{ p = 'f'; label = 'TATAMI F'; hue = 36 },
-    @{ p = 'g'; label = 'TATAMI G'; hue = 108 },
-    @{ p = 'h'; label = 'TATAMI H'; hue = 180 }
+    @{ p='a'; id='A'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' },
+    @{ p='b'; id='B'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' },
+    @{ p='c'; id='C'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' },
+    @{ p='d'; id='D'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' },
+    @{ p='e'; id='E'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' },
+    @{ p='f'; id='F'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' },
+    @{ p='g'; id='G'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' },
+    @{ p='h'; id='H'; port=1935; ver='2.0.4'; platform='Android'; mode='ручной'; ips=@();  message='Трансляция скоро продолжится'; poster='' }
 )
 
-New-Item -ItemType Directory -Force -Path fallback | Out-Null
-
+$root = Split-Path -Parent $PSScriptRoot
+$bg   = Join-Path $root 'fallback\banner_background.png'
 $font = 'C\:/Windows/Fonts/arial.ttf'
-$sub  = 'connection recovering...'
 
-foreach ($d in $defs) {
-    $out = "fallback/fallback_$($d.p).mp4"
+if (-not (Test-Path $bg)) { throw "background not found: $bg (copy images/banner_background.png from tournament-live into fallback/)" }
 
-    # Animated colorful source -> per-tatami hue -> two centered text lines.
-    $vf = "testsrc2=size=1280x720:rate=30," +
-          "hue=h=$($d.hue)," +
-          "drawtext=fontfile='${font}':text='$($d.label)':fontsize=88:fontcolor=white:borderw=4:bordercolor=black@0.7:x=(w-text_w)/2:y=(h/2)-90," +
-          "drawtext=fontfile='${font}':text='${sub}':fontsize=40:fontcolor=yellow:borderw=3:bordercolor=black@0.7:x=(w-text_w)/2:y=(h/2)+30"
-
-    ffmpeg -hide_banner -loglevel error -y `
-        -f lavfi -i "color=c=black:s=1280x720:r=30" `
-        -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" `
-        -f lavfi -i $vf `
-        -map 2:v -map 1:a `
-        -t 6 `
-        -c:v libx264 -pix_fmt yuv420p -profile:v baseline -level 3.1 -g 30 `
-        -c:a aac -ar 44100 -b:a 64k -shortest `
-        $out
-    Write-Host ("generated {0} (exit={1})" -f $out, $LASTEXITCODE)
+function DText([string]$txt, [int]$line) {
+    # One text line at (20, 20+60*line), 50px, #0064FF.
+    # A literal colon inside drawtext is written as \:.
+    $esc = $txt -replace ':', '\:'
+    "drawtext=fontfile='$font':text='$esc':fontsize=50:fontcolor=0x0064FF:x=20:y=$((20 + 60 * $line))"
 }
 
-Write-Host ""
-Write-Host "Fallback cards regenerated. Files live in ./fallback/ and are mounted read-only"
-Write-Host "into the supervisor container (FALLBACK_DIR=/fallback)."
+$failed = $false
+foreach ($d in $defs) {
+    $out = Join-Path $root "fallback\fallback_$($d.p).mp4"
+
+    $lines = @("ID: $($d.id)", "Port: $($d.port)", "Ver: $($d.ver)",
+               "Platform: $($d.platform)", "Mode: $($d.mode)")
+    foreach ($ip in $d.ips) { $lines += "IP: $ip" }
+    $lines += $d.message
+    $dt = @()
+    for ($i = 0; $i -lt $lines.Count; $i++) { $dt += DText $lines[$i] $i }
+
+    if ([string]::IsNullOrEmpty($d.poster)) {
+        # case 1: background + text only
+        ffmpeg -hide_banner -loglevel error -y `
+            -loop 1 -framerate 30 -i $bg `
+            -f lavfi -i 'anullsrc=channel_layout=stereo:sample_rate=44100' `
+            -vf ($dt -join ',') `
+            -map 0:v -map 1:a `
+            -t 6 -r 30 `
+            -c:v libx264 -pix_fmt yuv420p -profile:v baseline -level 4.0 -g 30 -crf 18 `
+            -c:a aac -ar 44100 -b:a 64k -shortest `
+            $out
+    } else {
+        # case 2: + poster in the right box (x 1000..1900, y 100..980);
+        # the text stays in the quiet zone and never touches the poster
+        $poster = $d.poster
+        if (-not [IO.Path]::IsPathRooted($poster)) { $poster = Join-Path $root $poster }
+        $fc = "[1:v]scale=900:880:force_original_aspect_ratio=decrease,format=rgba[p];" +
+              "[0:v][p]overlay=x='1000+(900-overlay_w)/2':y='100+(880-overlay_h)/2'[base];" +
+              "[base]" + ($dt -join ',') + "[v]"
+        ffmpeg -hide_banner -loglevel error -y `
+            -loop 1 -framerate 30 -i $bg `
+            -i $poster `
+            -f lavfi -i 'anullsrc=channel_layout=stereo:sample_rate=44100' `
+            -filter_complex $fc `
+            -map '[v]' -map 2:a `
+            -t 6 -r 30 `
+            -c:v libx264 -pix_fmt yuv420p -profile:v baseline -level 4.0 -g 30 -crf 18 `
+            -c:a aac -ar 44100 -b:a 64k -shortest `
+            $out
+    }
+    $code = $LASTEXITCODE
+    if ($code -eq 0) {
+        Write-Host "generated $out"
+    } else {
+        Write-Host "FAILED $out (ffmpeg exit=$code)"
+        $failed = $true
+    }
+}
+
+if ($failed) { throw 'one or more fallbacks failed' }
+Write-Host 'All stop-cards regenerated (1920x1080, 6s loop). To apply on a running stack:'
+Write-Host 'restart the letter feeders (panel END/RESUME) or restart the supervisor container.'

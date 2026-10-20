@@ -60,10 +60,19 @@ ufw enable
 Строго: ограничить 1935 по source IP (`ufw allow from <IP_телефонов/вышки> to any port 1935`),
 иначе приём защищён только длиной/случайностью stream_key.
 
-## 4. Заставки (fallback)
+## 4. Заставки (fallback) — стоп-карты
 Каждому татами — свой цикл. Положить `fallback/fallback_a.mp4 … _h.mp4`.
-Сгенерировать на сервере (яркая анимированная тест-карточка, свой оттенок на татами —
-как в локальном gen-fallback.ps1, но bash). Для bash нужен ffmpeg с `testsrc2` и `drawtext`:
+
+**Рекомендуемый путь (с 20.10.2026):** сгенерировать стоп-карты локально
+`powershell -ExecutionPolicy Bypass -File scripts/gen-fallback.ps1` (1920x1080,
+бренд-подложка `fallback/banner_background.png` + текст по татами; layout и данные —
+`docs/RELAY.md` §13) и скопировать готовые `fallback/*.mp4` с локальной машины сюда
+(`./fallback/`). Правка данных (ID/IP/постер) — в `$defs` генератора, затем
+перегенерация и повторное копирование.
+
+Экстренный вариант (без локальной машины) — сгенерировать прямо на сервере в bash
+(legacy-вид: яркая анимированная тест-карточка 1280x720, не бренд-стиль).
+Нужен ffmpeg с `testsrc2` и `drawtext`:
 ```bash
 FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 declare -A HUE=([a]=0 [b]=72 [c]=144 [d]=216 [e]=288 [f]=36 [g]=108 [h]=180)
