@@ -17,3 +17,10 @@ outputs/outputs.local.conf*
 outputs/*.paused
 deploy/vps/outputs/outputs.local.conf*
 deploy/vps/outputs/*.paused
+
+# VPS transfer artifacts / local-only deploy helpers (never commit)
+_staging/
+.deploy-keys/
+*.tgz
+__pycache__/
+*.pyc
