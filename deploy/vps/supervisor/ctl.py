@@ -7,16 +7,27 @@
 #   POST /end/<tatami>          -> graceful end: stop feeding broadcast/<x> (platform ends)
 #   POST /resume/<tatami>       -> back to hold: live if input up, else fallback
 #   GET  /outputs               -> {"items":[{"tatami","dest","enabled"}, ...]}
-#   POST /outputs               -> body {"items":[...]}; rewrites the outputs file
+#   POST /outputs               -> body {"items":[...]}; rewrites the outputs file.
+#                                 Items are validated server-side: any bad dest
+#                                 (doubled URL, spaces, missing key) rejects the
+#                                 WHOLE save with {"errors":[...]}, so a broken
+#                                 key can never silently reach the relayer.
 #
 # Outputs file format (one entry per line), read by the relayer container:
 #   <letter> <full-rtmp-url-with-key>        (enabled)
 #   #<letter> <full-rtmp-url-with-key>       (disabled)
+# Several lines may share one letter (same broadcast -> many platforms).
 #
 # No auth here: it is reached only through the panel origin, which on the VPS is
 # already behind Caddy TLS + BasicAuth.
-import sys, os, json, re
+
+import sys, os, json, re, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# ThreadingHTTPServer handles concurrent POSTs in parallel; serialize outputs
+# file rewrites (lock) and give each writer its own tmp file, so two saves
+# (double-click, panel + manual) can never interleave into a corrupted file.
+OUTPUTS_LOCK = threading.Lock()
 
 INTENT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/control"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8090
@@ -25,6 +36,48 @@ OUTPUTS_PATH = os.environ.get("OUTPUTS_PATH", "/outputs/outputs.local.conf")
 
 # <letter> <dest>, where a leading '#' marks a disabled entry.
 LINE_RE = re.compile(r"^\s*#?\s*([a-z])\s+(\S.*)$")
+
+# Known platform push bases (mirror of the cockpit's PLATFORMS table). Used
+# only for a human-readable platform name and one YouTube-specific check.
+YT_BASE = "rtmp://a.rtmp.youtube.com/live2/"
+BASE_NAMES = {
+    "rtmp://ovsu.okcdn.ru/input/": "VK",
+    YT_BASE: "YouTube",
+}
+
+
+def dest_label(dest):
+    """Short platform name for an error message (VK/YouTube/настроено)."""
+    for base, name in BASE_NAMES.items():
+        if dest.startswith(base):
+            return name
+    return "площадка"
+
+
+def validate_dest(t, dest):
+    """Return an error string for a panel entry, or None if it looks usable.
+
+    Guards the classic operator mistake: pasting the FULL server URL into the
+    stream-key field, which used to save as rtmp://host/app/rtmp://host/app and
+    silently broke the relay.
+    """
+    if not dest:
+        return None  # empty row: skipped on write
+    if dest.count("://") > 1 or " " in dest or "\t" in dest:
+        return (f"TATAMI {t.upper()} ({dest_label(dest)}): в адресе два RTMP URL подряд — "
+                "в поле «ключ» нужен ТОЛЬКО stream key без rtmp://")
+    if not dest.startswith(("rtmp://", "rtmps://", "srt://")):
+        return f"TATAMI {t.upper()}: адрес должен начинаться с rtmp:// (полный URL)"
+    if "ВСТАВЬ" in dest:
+        return (f"TATAMI {t.upper()} ({dest_label(dest)}): это заглушка вместо ключа — "
+                "вставь настоящий stream key")
+    key = dest.rsplit("/", 1)[-1]
+    if dest.startswith(YT_BASE) and key.rstrip("/") == "live2":
+        return ("TATAMI " + t.upper() + " (YouTube): нет stream key — вставь только ключ "
+                "вида xxxx-xxxx-xxxx-xxxx-xxxx, без rtmp://")
+    if not key:
+        return f"TATAMI {t.upper()}: в адресе нет ключа после последнего /"
+    return None
 
 
 def intent_of(t):
@@ -42,10 +95,17 @@ def set_intent(t, v):
 
 
 def read_outputs():
-    """Parse the outputs file into per-tatami entries; unknown tatamis are hidden."""
-    entries = {}
+    """Parse the outputs file into an ordered list of entries.
+
+    One letter may have SEVERAL platforms (several lines) - all are kept.
+    Entries for unknown letters are preserved too so nothing is lost if the
+    panel re-saves; the cockpit renders only known tatamis.
+    """
+    entries = []
     try:
-        with open(OUTPUTS_PATH, encoding="utf-8") as f:
+        # utf-8-sig: tolerate a Windows/Notepad BOM, otherwise it glues onto
+        # the first line and an entry on line 1 would silently not parse.
+        with open(OUTPUTS_PATH, encoding="utf-8-sig") as f:
             for raw in f:
                 line = raw.rstrip("\r\n")
                 if not line.strip():
@@ -54,24 +114,43 @@ def read_outputs():
                 if not m:
                     continue  # header/comment we don't own
                 t, dest = m.group(1), m.group(2).strip()
-                entries[t] = {"tatami": t, "dest": dest,
-                              "enabled": not line.lstrip().startswith("#")}
+                entries.append({"tatami": t, "dest": dest,
+                                "enabled": not line.lstrip().startswith("#")})
     except OSError:
         pass
-    # Stable order: all known tatamis first, then any extras from the file.
-    ordered = [entries[t] if t in entries else {"tatami": t, "dest": "", "enabled": False}
-               for t in TATAMIS]
-    for t, e in entries.items():
-        if t not in TATAMIS:
-            ordered.append(e)
-    return ordered
+    return entries
 
 
 def write_outputs(items):
-    """Persist the panel's list back to the outputs file (atomic replace)."""
+    """Validate then persist the panel's list back to the outputs file.
+
+    Returns (entries, errors). If ANY item is invalid nothing is written - the
+    caller answers 400 with the error list so the operator sees the problem
+    instead of pushing a broken key to a live platform.
+    """
+    errors = []
+    seen = set()
+    for it in items:
+        t = (it.get("tatami") or "").strip().lower()
+        dest = (it.get("dest") or "").strip()
+        if not it.get("enabled"):
+            continue  # disabled rows never reach the relayer - don't block on them
+        err = validate_dest(t, dest)
+        if err:
+            errors.append(err)
+            continue
+        if dest and (t, dest) in seen:
+            errors.append(f"TATAMI {t.upper()}: одинаковая строка площадки повторяется в списке")
+            continue
+        if dest:
+            seen.add((t, dest))
+    if errors:
+        return read_outputs(), errors
+
     header = (
         "# Platform destinations - managed from the web panel (Cockpit).\n"
         "# Format: <tatami letter> <full rtmp url with key>. A '#' line = disabled.\n"
+        "# Several lines may share one letter (VK + YouTube on the same tatami).\n"
         "# THIS FILE HOLDS LIVE KEYS - it is gitignored; do not commit.\n"
     )
     lines = [header]
@@ -82,12 +161,32 @@ def write_outputs(items):
         if t not in TATAMIS or not dest:
             continue  # skip empty/unknown rows so the file stays clean
         lines.append(f"{t} {dest}\n" if enabled else f"#{t} {dest}\n")
-    tmp = OUTPUTS_PATH + ".tmp"
-    os.makedirs(os.path.dirname(OUTPUTS_PATH), exist_ok=True)
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.writelines(lines)
-    os.replace(tmp, OUTPUTS_PATH)
-    return read_outputs()
+    # Unique tmp name per writer + process: never clash even under concurrency.
+    tmp = f"{OUTPUTS_PATH}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}"
+    with OUTPUTS_LOCK:
+        os.makedirs(os.path.dirname(OUTPUTS_PATH), exist_ok=True)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+            # Atomic publish: readers see old or new file, never a partial one.
+            # Win32 raises PermissionError (sharing violation) when a reader
+            # (AV / Docker file-share) holds the target mid-rename; retry with
+            # backoff. On Linux os.replace never fails, so the loop is free.
+            for attempt in range(10):
+                try:
+                    os.replace(tmp, OUTPUTS_PATH)
+                    break
+                except PermissionError:
+                    if attempt == 9:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+    return read_outputs(), []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -130,7 +229,11 @@ class Handler(BaseHTTPRequestHandler):
             items = body.get("items")
             if not isinstance(items, list):
                 self._send(400, {"error": "expected {'items':[...]}"}); return
-            self._send(200, {"items": write_outputs(items)})
+            entries, errors = write_outputs(items)
+            if errors:
+                self._send(400, {"error": "invalid outputs", "errors": errors})
+            else:
+                self._send(200, {"items": entries, "errors": []})
         else:
             self._send(400, {"error": "use /end/<tatami>, /resume/<tatami> or /outputs"})
 

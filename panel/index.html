@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TournamentLive — Cockpit</title>
+  <title>TournamentLive · Flight Deck</title>
   <!-- Optional deployment overrides (e.g. window.TL.playerOrigin on VPS). -->
   <!-- Served same-origin; harmless 404 locally where the file is absent. -->
   <script src="/config.js"></script>
@@ -18,6 +18,12 @@
     .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
     .card .top { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; }
     .card .name { font-weight:650; font-size:15px; }
+    .card .top .ttl { display:flex; align-items:center; gap:8px; }
+    .dest { font-size:11px; font-weight:700; letter-spacing:.3px; padding:3px 8px; border-radius:6px; white-space:nowrap; background:#22272f; border:1px solid var(--line); color:var(--muted); }
+    .dest.pyt { color:#f87171; border-color:#7f1d1d; background:#3a1414; }
+    .dest.pvk { color:#60a5fa; border-color:#1e40af; background:#17233f; }
+    .dest.pcustom { color:#c084fc; border-color:#581c87; background:#241338; }
+    .dest.off { opacity:.55; }
     .badges { display:flex; gap:8px; }
     .badge { font-size:11px; font-weight:700; letter-spacing:.4px; padding:4px 9px; border-radius:999px; text-transform:uppercase; }
     .live { background:#12351b; color:#4ade80; border:1px solid #1f5c2c; }
@@ -41,8 +47,13 @@
     .ow .lab { width:80px; font-weight:650; font-size:13px; }
     .ow select, .ow input { background:#0f1115; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:13px; }
     .ow input.dest { flex:1; min-width:220px; }
+    .ow input.dest.bad { border-color:#b91c1c; background:#2a1010; box-shadow:0 0 0 1px #b91c1c; }
+    .ow .rowerr { color:#f87171; font-size:11px; flex-basis:100%; }
+    .ow .rm { background:none; border:1px solid var(--line); color:var(--muted); border-radius:6px; cursor:pointer; font-size:12px; padding:4px 8px; }
+    .ow .rm:hover { color:#f87171; border-color:#6b2020; }
     .ow .en { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); }
     .ow .status { font-size:11px; color:var(--muted); width:96px; text-align:right; }
+    .addrow { margin-top:10px; background:#22272f; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
     .save { margin-top:12px; background:#1f6feb; color:#fff; border:0; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; }
     .save:hover { background:#2b7bff; }
     .msg { margin-left:12px; font-size:12px; color:var(--muted); }
@@ -50,12 +61,12 @@
 </head>
 <body>
   <header>
-    <h1>TournamentLive — Cockpit</h1>
+    <h1>TournamentLive <span style="color:var(--muted);font-weight:400">·</span> FLIGHT DECK</h1>
     <span class="sub">Вход телефона (tatami) → выход на площадки (broadcast). Обновление каждые 2 сек.</span>
   </header>
   <div class="outputs">
     <h2>🔌 Площадки (куда ретранслируем)</h2>
-    <p class="hint">Ключи площадок живут на сервере — НЕ в приложении и НЕ в QR. Вставь новый ключ VK/YouTube сюда, он применится автоматически (~3 сек), без перезапуска и без PowerShell.</p>
+    <p class="hint">Ключи площадок живут на сервере — НЕ в приложении и НЕ в QR. Вставь новый ключ VK/YouTube сюда, он применится автоматически (~3 сек), без перезапуска и без PowerShell. На одно татами можно повесить несколько площадок кнопкой ниже. В поле «ключ» — только stream key, без rtmp:// (панель исправит и подсветит ошибку).</p>
     <div id="ows"></div>
     <button class="save" id="saveOut">Сохранить площадки</button>
     <span class="msg" id="outMsg"></span>
@@ -172,75 +183,158 @@
     setInterval(tick, 2000);
 
     // ---- Platform outputs editor (VK/YouTube keys), served by /ctl/outputs ----
+    // Several platforms may share ONE tatami: rows are free-form, keyed by
+    // nothing; each row = {tatami, plat, val, enabled} -> one line in the file.
     const PLATFORMS = {
       vk:     { name: 'VK Video', base: 'rtmp://ovsu.okcdn.ru/input/' },
       yt:     { name: 'YouTube',  base: 'rtmp://a.rtmp.youtube.com/live2/' },
       custom: { name: 'Другая (полный URL)', base: null }
     };
-    let OUT_ITEMS = {};
+    let ROWS = [];
 
-    function destToPlatform(dest) {
+    function splitDest(dest) {
+      dest = (dest || '').trim();
       for (const k of ['vk', 'yt']) {
         const b = PLATFORMS[k].base;
-        if (dest && dest.startsWith(b)) return { plat: k, val: dest.slice(b.length) };
+        if (dest.startsWith(b)) return { plat: k, val: dest.slice(b.length) };
       }
-      return { plat: dest ? 'custom' : 'vk', val: dest || '' };
+      return { plat: dest ? 'custom' : 'vk', val: dest };
     }
-    function composeDest(plat, val) {
-      val = (val || '').trim();
-      if (!val) return '';
-      return plat === 'custom' ? val : PLATFORMS[plat].base + val;
+
+    // Repair the classic mistake BEFORE validation: a full URL pasted into the
+    // key field. Re-splitting base+val collapses 'base + base + key' back to
+    // 'base + key' and switches the platform to whatever URL was actually given.
+    function normalizeRow(r) {
+      r.val = (r.val || '').trim();
+      let fixed = false;
+      // Only vk/yt rows can carry an accidental full URL: 'custom' rows ARE
+      // full URLs by design, touching them would be wrong (and would loop).
+      while (r.plat !== 'custom' && r.val.includes('://')) {
+        if (r.val.startsWith(PLATFORMS[r.plat].base)) {
+          r.val = r.val.slice(PLATFORMS[r.plat].base.length).trim();
+        } else {
+          const m = splitDest(r.val);
+          r.plat = m.plat; r.val = m.val.trim();
+        }
+        fixed = true;
+        if (!r.val) break;
+      }
+      return { fixed };
+    }
+
+    // Client-side twin of ctl.py validate_dest: red text under the row.
+    function rowError(r) {
+      const dest = r.plat === 'custom' ? r.val : (r.val ? PLATFORMS[r.plat].base + r.val : '');
+      if (!dest) return null;
+      if (dest.includes(' ')) return 'в адресе недопустимы пробелы — вставь только stream key';
+      // A valid dest has exactly one scheme; two means a doubled paste.
+      if (dest.split('://').length > 2) return 'в адресе два RTMP URL подряд — в поле «ключ» нужен ТОЛЬКО stream key без rtmp://';
+      if (r.plat === 'custom' && !/^rtmp(s)?:\/\/|^srt:\/\//.test(dest)) return 'адрес должен начинаться с rtmp://';
+      if (dest.endsWith('/')) return 'в адресе нет ключа после последнего /';
+      if (dest.includes('ВСТАВЬ')) return 'это заглушка вместо ключа — вставь настоящий stream key';
+      if (r.plat === 'yt' && r.val.split('/').filter(Boolean).join('/').toLowerCase() === 'live2') return 'нет stream key — вставь ключ вида xxxx-xxxx-xxxx-xxxx-xxxx';
+      return null;
     }
 
     async function loadOutputs() {
       try {
         const r = await fetch('/ctl/outputs', { cache: 'no-store' });
         const data = await r.json();
-        OUT_ITEMS = {};
-        (data.items || []).forEach((it) => (OUT_ITEMS[it.tatami] = it));
-      } catch (e) { OUT_ITEMS = {}; }
+        ROWS = (data.items || []).map((it) => {
+          const m = splitDest(it.dest);
+          return { tatami: it.tatami, plat: m.plat, val: m.val, enabled: !!it.enabled };
+        });
+      } catch (e) { ROWS = []; }
       renderOutputs();
     }
 
     function renderOutputs() {
       const box = document.getElementById('ows'); if (!box) return;
       box.innerHTML = '';
-      TATAMIS.forEach((t) => {
-        const it = OUT_ITEMS[t] || { dest: '', enabled: false };
-        const map = destToPlatform(it.dest);
-        const status = it.enabled ? 'активно' : (it.dest ? 'выключено' : 'не задано');
+      ROWS.forEach((r, i) => {
         const opts = Object.entries(PLATFORMS)
-          .map(([k, v]) => `<option value="${k}"${k === map.plat ? ' selected' : ''}>${v.name}</option>`).join('');
+          .map(([k, v]) => `<option value="${k}"${k === r.plat ? ' selected' : ''}>${v.name}</option>`).join('');
+        const tOpts = TATAMIS
+          .map((t) => `<option value="${t}"${t === r.tatami ? ' selected' : ''}>${t.toUpperCase()}</option>`).join('');
+        const status = r.enabled ? 'активно' : (r.val ? 'выключено' : 'не задано');
         const row = document.createElement('div');
         row.className = 'ow';
         row.innerHTML =
-          `<span class="lab">TATAMI ${t.toUpperCase()}</span>` +
-          `<select id="op-plat-${t}">${opts}</select>` +
-          `<input class="dest" id="op-val-${t}" placeholder="${map.plat === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)'}" value="${(map.val || '').replace(/"/g, '&quot;')}">` +
-          `<label class="en"><input type="checkbox" id="op-en-${t}"${it.enabled ? ' checked' : ''}> вкл</label>` +
-          `<span class="status">${status}</span>`;
-        const sel = row.querySelector('#op-plat-' + t), inp = row.querySelector('#op-val-' + t);
-        sel.onchange = () => { inp.placeholder = sel.value === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)'; };
+          `<span class="lab">ТАТАМИ</span>` +
+          `<select class="tsel">${tOpts}</select>` +
+          `<select class="psel">${opts}</select>` +
+          `<input class="dest" placeholder="${r.plat === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)'}" value="${(r.val || '').replace(/"/g, '&quot;')}">` +
+          `<label class="en"><input type="checkbox" class="een"${r.enabled ? ' checked' : ''}> вкл</label>` +
+          `<span class="status">${status}</span>` +
+          `<button class="rm" title="Удалить строку">✕</button>` +
+          `<div class="rowerr"></div>`;
+        const sel = row.querySelector('.psel'), inp = row.querySelector('.dest'), errEl = row.querySelector('.rowerr');
+        const liveCheck = () => {
+          ROWS[i].val = inp.value.trim();   // write DOM -> state (save reads ROWS)
+          ROWS[i].plat = sel.value;
+          const err = rowError(ROWS[i]);
+          inp.classList.toggle('bad', !!err);
+          errEl.textContent = err || '';
+        };
+        inp.oninput = liveCheck;
+        sel.onchange = () => {
+          inp.placeholder = sel.value === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)';
+          liveCheck();
+        };
+        row.querySelector('.tsel').onchange = (e) => { ROWS[i].tatami = e.target.value; };
+        row.querySelector('.een').onchange = (e) => { ROWS[i].enabled = e.target.checked; };
+        row.querySelector('.rm').onclick = () => { ROWS.splice(i, 1); renderOutputs(); };
         box.appendChild(row);
       });
+      const add = document.createElement('button');
+      add.className = 'addrow'; add.id = 'addOut';
+      add.textContent = '➕ Добавить площадку (можно несколько на одно татами)';
+      add.onclick = () => { ROWS.push({ tatami: 'a', plat: 'vk', val: '', enabled: false }); renderOutputs(); };
+      box.appendChild(add);
     }
 
     async function saveOutputs() {
-      const msg = document.getElementById('outMsg'); msg.textContent = 'сохраняю…';
-      const items = TATAMIS.map((t) => ({
-        tatami: t,
-        dest: composeDest(document.getElementById('op-plat-' + t).value, document.getElementById('op-val-' + t).value),
-        enabled: document.getElementById('op-en-' + t).checked
+      const msg = document.getElementById('outMsg');
+      const errs = [];
+      let repaired = 0;
+      // Normalize in place (silently repairs base+URL pastes), then validate.
+      // Disabled rows only get a red hint - they don't block saving.
+      ROWS.forEach((r) => {
+        const n = normalizeRow(r);
+        const err = rowError(r);
+        if (err && r.enabled) errs.push(`TATAMI ${r.tatami.toUpperCase()}: ${err}`);
+        else if (n.fixed && r.val) repaired++;
+      });
+      renderOutputs(); // show normalized values + red marks
+      if (errs.length) {
+        msg.textContent = '✗ не сохранено: ' + errs.join(' · ');
+        msg.style.color = '#f87171';
+        return;
+      }
+      msg.textContent = 'сохраняю…'; msg.style.color = '';
+      const items = ROWS.map((r) => ({
+        tatami: r.tatami,
+        dest: r.plat === 'custom' ? r.val.trim() : (r.val.trim() ? PLATFORMS[r.plat].base + r.val.trim() : ''),
+        enabled: r.enabled
       }));
       try {
         const r = await fetch('/ctl/outputs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
         const data = await r.json();
-        OUT_ITEMS = {};
-        (data.items || []).forEach((it) => (OUT_ITEMS[it.tatami] = it));
+        if (!r.ok) {
+          const list = (data.errors || [data.error || 'ошибка сервера']);
+          msg.textContent = '✗ сервер отклонил: ' + list.join(' · ');
+          msg.style.color = '#f87171';
+          return;
+        }
+        ROWS = (data.items || []).map((it) => {
+          const m = splitDest(it.dest);
+          return { tatami: it.tatami, plat: m.plat, val: m.val, enabled: !!it.enabled };
+        });
         renderOutputs();
-        msg.textContent = '✓ сохранено — реле применит ~3 сек';
-        setTimeout(() => (msg.textContent = ''), 6000);
-      } catch (e) { msg.textContent = '✗ ошибка сохранения'; }
+        msg.textContent = '✓ сохранено — реле применит ~3 сек'
+          + (repaired ? ` (исправлено вставленных URL вместо ключа: ${repaired})` : '');
+        setTimeout(() => (msg.textContent = ''), 8000);
+      } catch (e) { msg.textContent = '✗ ошибка сохранения'; msg.style.color = '#f87171'; }
     }
 
     document.getElementById('saveOut').onclick = saveOutputs;
