@@ -16,7 +16,7 @@
     header .sub { color:var(--muted); font-size:13px; }
     .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(400px,1fr)); gap:16px; padding:20px 22px; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-    .card .top { display:flex; justify-content:space-between; align-items:center; padding:12px 14px 6px; gap:8px; }
+    .card .top { display:flex; justify-content:space-between; align-items:center; padding:12px 14px 6px; gap:8px; cursor:pointer; user-select:none; }
     .card .name { font-weight:700; font-size:16px; }
     .card .top .ttl { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .dest { font-size:11px; font-weight:700; letter-spacing:.3px; padding:3px 8px; border-radius:6px; white-space:nowrap; background:#22272f; border:1px solid var(--line); color:var(--muted); }
@@ -69,9 +69,9 @@
     .save:hover { background:#2b7bff; }
     .msg { margin-left:8px; font-size:11px; color:var(--muted); }
     .empty { color:var(--muted); font-size:12px; padding:4px 0; }
-    /* Collapsible push header + screen add/remove footer */
-    .bt.tog { cursor:pointer; user-select:none; }
-    .bt.tog:hover { color:var(--txt); }
+    /* Card-wide settings accordion: one click on the header opens/closes ALL
+       per-screen settings (caption + push + platforms + buttons). */
+    .tri { display:inline-block; width:14px; color:var(--muted); font-weight:700; }
     .foot { display:flex; gap:10px; padding:2px 22px 26px; flex-wrap:wrap; }
     .foot .btn.addscr { color:#4ade80; border-color:#1f5c2c; }
     .foot .btn.rmscr { color:#f87171; border-color:#6b2020; }
@@ -80,7 +80,7 @@
 <body>
   <header>
     <h1>TournamentLive <span style="color:var(--muted);font-weight:400">·</span> FLIGHT DECK</h1>
-    <span class="sub">Экран N = ключ N: поток, залитый по ключу N, появляется ровно на экране N. Экранов столько, сколько нужно — «➕» добавляет, «−» убирает последний. Обновление каждые 2 сек.</span>
+    <span class="sub">Экран N = ключ N. Клик по «ЭКРАН N» открывает/скрывает все настройки карточки. Экранов столько, сколько нужно — «➕» добавляет, «−» убирает последний. Обновление каждые 2 сек.</span>
   </header>
   <div class="grid" id="grid"></div>
   <div class="foot">
@@ -116,66 +116,65 @@
       card.className = 'card';
       card.id = 'card-' + t;
       card.innerHTML = `
-        <div class="top">
-          <div class="ttl">ЭКРАН ${n} <span class="dest off" id="chip-${t}">без площадки</span></div>
+        <div class="top" id="top-${t}">
+          <div class="ttl"><span class="tri" id="tri-${t}">▸</span> ЭКРАН ${n} <span class="dest off" id="chip-${t}">без площадки</span></div>
           <div class="badges">
             <span class="badge" id="in-${t}">…</span>
             <span class="badge" id="out-${t}">…</span>
           </div>
         </div>
-        <div class="labelrow">
-          <input id="lab-${t}" maxlength="80" placeholder="подпись: татами / турнир (например: Татами А · Кубок района)">
-        </div>
         <div class="preview">
           <div class="ph" id="ph-${t}">Предпросмотр выключен для экономии CPU</div>
         </div>
-        <div class="pushbox">
-          <div class="bt tog" id="tog-${t}">▾ 📲 Куда лить на этот экран · ключ ${n}</div>
-          <div id="pb-${t}">
+        <div class="cfg" id="cfg-${t}" style="display:none">
+          <div class="labelrow">
+            <input id="lab-${t}" maxlength="80" placeholder="подпись: татами / турнир (например: Татами А · Кубок района)">
+          </div>
+          <div class="pushbox">
+            <div class="bt">📲 Куда лить на этот экран (настройки камеры/приложения):</div>
             <div class="kv"><span class="k">URL</span><code>${RTMP_PUSH_URL}</code><button class="cp" id="cpurl-${t}">копировать</button></div>
             <div class="kv"><span class="k">Ключ</span><code class="key">${n}</code><button class="cp" id="cpkey-${t}">копировать</button></div>
             <div class="warn">URL — со слэшем «/» на конце; в поле «ключ» — только цифра ${n}.</div>
           </div>
-        </div>
-        <div class="platbox">
-          <div class="bt">🔌 Куда транслируем с этого экрана (площадки):</div>
-          <div id="prows-${t}"></div>
-          <div>
-            <button class="addrow" id="add-${t}">➕ Площадка</button>
-            <button class="save" id="save-${t}">Сохранить площадки</button>
-            <span class="msg" id="msg-${t}"></span>
+          <div class="platbox">
+            <div class="bt">🔌 Куда транслируем с этого экрана (площадки):</div>
+            <div id="prows-${t}"></div>
+            <div>
+              <button class="addrow" id="add-${t}">➕ Площадка</button>
+              <button class="save" id="save-${t}">Сохранить площадки</button>
+              <span class="msg" id="msg-${t}"></span>
+            </div>
           </div>
-        </div>
-        <div class="out">Выход (то, что видят площадки): <b id="mode-${t}" style="color:var(--txt)">…</b></div>
-        <div class="meta" id="meta-${t}">разрешение: — · входящий: — Мбит/с</div>
-        <div>
-          <a class="btn" id="pv-${t}" href="#">Показать живое видео</a>
-          <a class="btn" id="op-${t}" href="#" target="_blank">Открыть в новой вкладке</a>
-          <a class="btn ctl-end" id="end-${t}" href="#" title="Штатно завершить: площадка покажет «трансляция окончена»">Завершить</a>
-          <a class="btn ctl-resume" id="res-${t}" href="#" title="Снова держать выход (live/заставка)">Возобновить</a>
+          <div class="out">Выход (то, что видят площадки): <b id="mode-${t}" style="color:var(--txt)">…</b></div>
+          <div class="meta" id="meta-${t}">разрешение: — · входящий: — Мбит/с</div>
+          <div>
+            <a class="btn" id="pv-${t}" href="#">Показать живое видео</a>
+            <a class="btn" id="op-${t}" href="#" target="_blank">Открыть в новой вкладке</a>
+            <a class="btn ctl-end" id="end-${t}" href="#" title="Штатно завершить: площадка покажет «трансляция окончена»">Завершить</a>
+            <a class="btn ctl-resume" id="res-${t}" href="#" title="Снова держать выход (live/заставка)">Возобновить</a>
+          </div>
         </div>
       `;
       grid.appendChild(card);
+      document.getElementById('top-' + t).onclick = () => setCfgOpen(t, isCfgOpen(t) ? '0' : '1');
+      setCfgOpen(t, localStorage.getItem('tl.cfg.' + t) || '0');   // compact by default
       document.getElementById('end-' + t).onclick = (e) => { e.preventDefault(); ctl('end', t); };
       document.getElementById('res-' + t).onclick = (e) => { e.preventDefault(); ctl('resume', t); };
       document.getElementById('lab-' + t).onchange = () => saveLabel(t);
       document.getElementById('cpurl-' + t).onclick = () => copyText(RTMP_PUSH_URL, document.getElementById('cpurl-' + t));
       document.getElementById('cpkey-' + t).onclick = () => copyText(String(num(t)), document.getElementById('cpkey-' + t));
-      document.getElementById('tog-' + t).onclick = () => setPushOpen(t, isPushOpen(t) ? '0' : '1');
-      setPushOpen(t, localStorage.getItem('tl.push.' + t) || '1');  // open by default
       document.getElementById('add-' + t).onclick = () => { ROWS.push({ tatami: t, plat: 'vk', val: '', enabled: false }); renderPlats(); };
       document.getElementById('save-' + t).onclick = () => saveOutputs(t);
     });
 
-    // ---- Collapsible "куда лить" block (state remembered per screen) --------
-    function isPushOpen(t) {
-      return document.getElementById('pb-' + t).style.display !== 'none';
+    // ---- Whole-card settings accordion (state remembered per screen) --------
+    function isCfgOpen(t) {
+      return document.getElementById('cfg-' + t).style.display !== 'none';
     }
-    function setPushOpen(t, v) {           // v: '1' open / '0' closed
-      localStorage.setItem('tl.push.' + t, v);
-      document.getElementById('pb-' + t).style.display = v === '1' ? '' : 'none';
-      document.getElementById('tog-' + t).textContent =
-        (v === '1' ? '▾ ' : '▸ ') + '📲 Куда лить на этот экран · ключ ' + num(t);
+    function setCfgOpen(t, v) {           // v: '1' open / '0' closed
+      localStorage.setItem('tl.cfg.' + t, v);
+      document.getElementById('cfg-' + t).style.display = v === '1' ? '' : 'none';
+      document.getElementById('tri-' + t).textContent = v === '1' ? '▾' : '▸';
     }
 
     // ---- Active screens: cards 1..COUNT visible; '+', '−' change the count --
@@ -199,8 +198,8 @@
     }
     document.getElementById('addScr').onclick = () => {
       if (COUNT >= LETTERS.length) return;
-      const t = LETTERS[COUNT];                 // the new screen: expand its
-      setPushOpen(t, '1');                      // push block so the key is seen
+      const t = LETTERS[COUNT];                 // the new screen: open its
+      setCfgOpen(t, '1');                       // settings so the key is seen
       setCount(COUNT + 1);
     };
     document.getElementById('rmScr').onclick = () => {
