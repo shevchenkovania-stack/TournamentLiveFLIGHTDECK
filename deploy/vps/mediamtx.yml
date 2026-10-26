@@ -6,7 +6,7 @@
 #     exclusively through Caddy, which enforces TLS + BasicAuth. So the operator
 #     facing surface is authenticated at the reverse proxy.
 #   * Anonymous permissions are narrowed to PUBLISH on the media paths only.
-#     Ingest is protected by (a) unguessable per-tatami stream keys and
+#     Ingest is protected by (a) the per-screen stream keys (1..8) and
 #     (b) firewalling 1935 to the competition/phone egress IPs. See README.
 #   * hlsAlwaysRemux is off: HLS is generated on demand per viewer (cheaper).
 
@@ -33,7 +33,7 @@ apiAddress: :9997
 # reachable only from the internal Docker network, and the sole public door to
 # them is Caddy, which enforces TLS + BasicAuth. MediaMTX therefore grants the
 # anonymous user the actions Caddy's proxies need (publish/read/playback/api).
-# Ingest is protected by unguessable per-tatami keys + firewalling 1935 (README §3).
+# Ingest is protected by the per-screen keys + firewalling 1935 (README §3).
 authMethod: internal
 authInternalUsers:
   - user: any
@@ -59,17 +59,20 @@ pathDefaults:
   record: no
 
 paths:
-  # 8 independent tatami inputs (reserved capacity). Replace with your real keys, e.g. tatami/A7f3kQ.
-  tatami/a: { source: publisher, record: yes }
-  tatami/b: { source: publisher, record: yes }
-  tatami/c: { source: publisher, record: yes }
-  tatami/d: { source: publisher, record: yes }
-  tatami/e: { source: publisher, record: yes }
-  tatami/f: { source: publisher, record: yes }
-  tatami/g: { source: publisher, record: yes }
-  tatami/h: { source: publisher, record: yes }
+  # 8 numbered ingest keys: ЭКРАН N takes the stream pushed with key N
+  # (rtmp://<host>:1935/tatami/ + key N). Numbers are screen keys, not tatami
+  # names - the tatami/tournament name is a free-text label in the panel only.
+  tatami/1: { source: publisher, record: yes }
+  tatami/2: { source: publisher, record: yes }
+  tatami/3: { source: publisher, record: yes }
+  tatami/4: { source: publisher, record: yes }
+  tatami/5: { source: publisher, record: yes }
+  tatami/6: { source: publisher, record: yes }
+  tatami/7: { source: publisher, record: yes }
+  tatami/8: { source: publisher, record: yes }
 
   # Output paths fed by the supervisor (live or fallback). Platforms read these.
+  # Internal letters a..h == screens 1..8 (broadcast/a is ЭКРАН 1, etc.).
   broadcast/a: { source: publisher, record: no }
   broadcast/b: { source: publisher, record: no }
   broadcast/c: { source: publisher, record: no }

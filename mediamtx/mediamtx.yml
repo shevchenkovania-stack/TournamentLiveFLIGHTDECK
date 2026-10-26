@@ -45,24 +45,25 @@ pathDefaults:
   recordSegmentDuration: 60s
   recordDeleteAfter: 24h
 
-# --- Paths: 8 independent tatami inputs (reserved capacity) ---
-# Phone pushes rtmp://<server>:1935/tatami/<a|b|c|d|e|f|g|h>
+# --- Paths: 8 numbered ingest keys (same model as the VPS) ---
+# Phone pushes rtmp://<server>:1935/tatami/<1..8>; key N feeds ЭКРАН N.
+# Internal broadcast outputs stay letters a..h == screens 1..8.
 paths:
-  tatami/a:
+  tatami/1:
     source: publisher
-  tatami/b:
+  tatami/2:
     source: publisher
-  tatami/c:
+  tatami/3:
     source: publisher
-  tatami/d:
+  tatami/4:
     source: publisher
-  tatami/e:
+  tatami/5:
     source: publisher
-  tatami/f:
+  tatami/6:
     source: publisher
-  tatami/g:
+  tatami/7:
     source: publisher
-  tatami/h:
+  tatami/8:
     source: publisher
 
   # Output paths: always fed by the supervisor (live when phone is up, fallback

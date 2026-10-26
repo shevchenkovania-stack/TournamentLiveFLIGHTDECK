@@ -6,7 +6,8 @@
 #
 # NOTE: this uses synthetic FFmpeg test streams as phone placeholders. To use
 # real TournamentLive phones instead, do NOT run the test streams (comment the
-# start-test-streams line) and point the phones at rtmp://<thisPC-ip>:1935/tatami/<x>.
+# start-test-streams line) and point the phones at rtmp://<thisPC-ip>:1935/tatami/ + key N
+# (key N = screen number, see the panel card).
 #
 # NOTE: feeders + restreaming run INSIDE the supervisor/relayer containers.
 # scripts/supervisor.ps1 is the legacy host-side fallback — do not run both, two
@@ -38,4 +39,4 @@ Write-Host "   restream log: docker compose logs -f relayer"
 
 Start-Sleep -Seconds 8
 Write-Host "`nDone. Open the cockpit:  http://localhost:8000" -ForegroundColor Green
-Write-Host "Per-tatami raw player:   http://localhost:8888/broadcast/a .. /h" -ForegroundColor Green
+Write-Host "Per-screen raw player:   http://localhost:8888/broadcast/a .. /h (= ЭКРАН 1..8)" -ForegroundColor Green

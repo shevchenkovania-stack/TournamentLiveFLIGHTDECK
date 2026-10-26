@@ -11,14 +11,14 @@
     :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --txt:#e6e9ef; --muted:#8b94a7; }
     * { box-sizing: border-box; }
     body { margin:0; background:var(--bg); color:var(--txt); font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif; }
-    header { display:flex; align-items:center; gap:16px; padding:16px 22px; border-bottom:1px solid var(--line); }
+    header { display:flex; align-items:center; gap:16px; padding:16px 22px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
     header h1 { font-size:18px; margin:0; font-weight:650; }
     header .sub { color:var(--muted); font-size:13px; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(360px,1fr)); gap:16px; padding:20px 22px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(400px,1fr)); gap:16px; padding:20px 22px; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-    .card .top { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; }
-    .card .name { font-weight:650; font-size:15px; }
-    .card .top .ttl { display:flex; align-items:center; gap:8px; }
+    .card .top { display:flex; justify-content:space-between; align-items:center; padding:12px 14px 6px; gap:8px; }
+    .card .name { font-weight:700; font-size:16px; }
+    .card .top .ttl { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .dest { font-size:11px; font-weight:700; letter-spacing:.3px; padding:3px 8px; border-radius:6px; white-space:nowrap; background:#22272f; border:1px solid var(--line); color:var(--muted); }
     .dest.pyt { color:#f87171; border-color:#7f1d1d; background:#3a1414; }
     .dest.pvk { color:#60a5fa; border-color:#1e40af; background:#17233f; }
@@ -32,101 +32,147 @@
     .preview { position:relative; aspect-ratio:16/9; background:#000; }
     .preview iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
     .preview .ph { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:13px; }
-    .btn { margin:10px 14px 14px; display:inline-block; background:#22272f; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; text-decoration:none; }
+    .btn { margin:8px 6px 8px 14px; display:inline-block; background:#22272f; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; text-decoration:none; }
     .btn:hover { background:#2b323d; }
     .btn.ctl-end { color:#f87171; border-color:#6b2020; }
     .btn.ctl-resume { color:#4ade80; border-color:#1f5c2c; }
     .btn[aria-disabled="true"] { opacity:.3; pointer-events:none; }
     .meta { color:var(--muted); font-size:12px; padding:0 14px 10px; }
     .out { display:flex; gap:10px; align-items:center; padding:2px 14px 12px; font-size:12px; color:var(--muted); }
-    .srcrow { display:flex; gap:8px; align-items:center; padding:0 14px 10px; font-size:12px; color:var(--muted); }
-    .srcrow select { background:#0f1115; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:4px 8px; font-size:12px; }
-    .srcrow .hint { flex:1; text-align:right; font-size:11px; }
-    /* Platform outputs editor (VK/YouTube keys) */
-    .outputs { margin:4px 22px; border:1px solid var(--line); border-radius:12px; background:var(--card); padding:14px 16px; }
-    .outputs h2 { font-size:14px; margin:0 0 4px; font-weight:650; }
-    .outputs .hint { color:var(--muted); font-size:12px; margin:0 0 12px; }
-    .ow { display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
-    .ow .lab { width:80px; font-weight:650; font-size:13px; }
-    .ow select, .ow input { background:#0f1115; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:13px; }
-    .ow input.dest { flex:1; min-width:220px; }
-    .ow input.dest.bad { border-color:#b91c1c; background:#2a1010; box-shadow:0 0 0 1px #b91c1c; }
-    .ow .rowerr { color:#f87171; font-size:11px; flex-basis:100%; }
-    .ow .rm { background:none; border:1px solid var(--line); color:var(--muted); border-radius:6px; cursor:pointer; font-size:12px; padding:4px 8px; }
-    .ow .rm:hover { color:#f87171; border-color:#6b2020; }
-    .ow .en { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); }
-    .ow .status { font-size:11px; color:var(--muted); width:96px; text-align:right; }
-    .addrow { margin-top:10px; background:#22272f; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
-    .save { margin-top:12px; background:#1f6feb; color:#fff; border:0; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; }
+    /* Caption: tatami / tournament name typed by the operator (display only). */
+    .labelrow { padding:0 14px 10px; }
+    .labelrow input { width:100%; background:#0f1115; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:13px; }
+    .labelrow input::placeholder { color:#525b6b; }
+    /* Push info INSIDE the card: URL + key of THIS screen (key = screen number). */
+    .pushbox { margin:0 14px 12px; border:1px solid var(--line); border-radius:10px; background:#12151b; padding:10px 12px; }
+    .bt { font-size:12px; font-weight:650; color:var(--muted); margin-bottom:8px; }
+    .kv { display:flex; align-items:center; gap:8px; padding:3px 0; }
+    .kv .k { width:44px; font-size:11px; color:var(--muted); text-transform:uppercase; }
+    .kv code { flex:1; background:#0b0d11; border:1px solid var(--line); border-radius:6px; padding:5px 8px; font-size:13px; word-break:break-all; }
+    .kv code.key { color:#4ade80; font-weight:700; font-size:15px; flex:0 0 auto; min-width:44px; text-align:center; }
+    .cp { background:#22272f; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; white-space:nowrap; }
+    .cp:hover { background:#2b323d; }
+    .warn { font-size:11px; color:var(--muted); margin-top:6px; }
+    /* Platform editor inside the card */
+    .platbox { margin:0 14px 12px; border:1px solid var(--line); border-radius:10px; background:#12151b; padding:10px 12px; }
+    .prow { display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+    .prow:first-child { border-top:0; }
+    .prow select, .prow input { background:#0f1115; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:13px; }
+    .prow input.dest { flex:1; min-width:160px; border-radius:8px; }
+    .prow input.dest.bad { border-color:#b91c1c; background:#2a1010; box-shadow:0 0 0 1px #b91c1c; }
+    .prow .rowerr { color:#f87171; font-size:11px; flex-basis:100%; }
+    .prow .rm { background:none; border:1px solid var(--line); color:var(--muted); border-radius:6px; cursor:pointer; font-size:12px; padding:4px 8px; }
+    .prow .rm:hover { color:#f87171; border-color:#6b2020; }
+    .prow .en { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); }
+    .addrow { margin-top:8px; background:#22272f; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
+    .save { margin-top:8px; margin-left:8px; background:#1f6feb; color:#fff; border:0; border-radius:8px; padding:6px 14px; font-size:12px; cursor:pointer; }
     .save:hover { background:#2b7bff; }
-    .msg { margin-left:12px; font-size:12px; color:var(--muted); }
+    .msg { margin-left:8px; font-size:11px; color:var(--muted); }
+    .empty { color:var(--muted); font-size:12px; padding:4px 0; }
   </style>
 </head>
 <body>
   <header>
     <h1>TournamentLive <span style="color:var(--muted);font-weight:400">·</span> FLIGHT DECK</h1>
-    <span class="sub">Экраны не привязаны к татами: источник выбирается на карточке (Авто = первый свободный вход). Обновление каждые 2 сек.</span>
+    <span class="sub">Экран N = ключ N: поток, залитый по ключу N, появляется ровно на экране N. Подпись «татами/турнир» — свободный текст. Обновление каждые 2 сек.</span>
   </header>
-  <div class="outputs">
-    <h2>🔌 Площадки (куда ретранслируем)</h2>
-    <p class="hint">Ключи площадок живут на сервере — НЕ в приложении и НЕ в QR. Вставь новый ключ VK/YouTube сюда, он применится автоматически (~3 сек), без перезапуска и без PowerShell. На одно татами можно повесить несколько площадок кнопкой ниже. В поле «ключ» — только stream key, без rtmp:// (панель исправит и подсветит ошибку).</p>
-    <div id="ows"></div>
-    <button class="save" id="saveOut">Сохранить площадки</button>
-    <span class="msg" id="outMsg"></span>
-  </div>
   <div class="grid" id="grid"></div>
 
   <script>
-    const TATAMIS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    // Internal letters a..h == ЭКРАН 1..8. The operator only ever sees numbers.
+    const LETTERS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const num = (t) => LETTERS.indexOf(t) + 1;
+    const RTMP_PUSH_URL = `rtmp://${location.hostname}:1935/tatami/`;
     const grid = document.getElementById('grid');
 
-    // Build card skeleton once. A "screen" (broadcast output) is decoupled from
-    // the tatami letter: its source is chosen per card (auto | a..h).
-    TATAMIS.forEach((t) => {
+    // Platform presets (keys live on the server, entered per card).
+    const PLATFORMS = {
+      vk:     { name: 'VK Video', base: 'rtmp://ovsu.okcdn.ru/input/', cls: 'pvk' },
+      yt:     { name: 'YouTube',  base: 'rtmp://a.rtmp.youtube.com/live2/', cls: 'pyt' },
+      custom: { name: 'Другая (полный URL)', base: null, cls: 'pcustom' }
+    };
+
+    // ROWS = all platform entries (one letter may have several platforms).
+    let ROWS = [];
+    let LABELS = {};
+
+    // ---- Build the eight screen cards ----------------------------------------
+    LETTERS.forEach((t) => {
+      const n = num(t);
       const card = document.createElement('div');
       card.className = 'card';
       card.id = 'card-' + t;
       card.innerHTML = `
         <div class="top">
-          <div class="name">SCREEN ${t.toUpperCase()} <span class="dest" id="chip-${t}">…</span></div>
+          <div class="ttl">ЭКРАН ${n} <span class="dest off" id="chip-${t}">без площадки</span></div>
           <div class="badges">
             <span class="badge" id="in-${t}">…</span>
             <span class="badge" id="out-${t}">…</span>
           </div>
         </div>
+        <div class="labelrow">
+          <input id="lab-${t}" maxlength="80" placeholder="подпись: татами / турнир (например: Татами А · Кубок района)">
+        </div>
         <div class="preview">
           <div class="ph" id="ph-${t}">Предпросмотр выключен для экономии CPU</div>
         </div>
-        <div class="srcrow">Источник:
-          <select id="src-${t}"><option value="auto">Авто</option>${TATAMIS.map((x) => `<option value="${x}">Татами ${x.toUpperCase()}</option>`).join('')}</select>
-          <span class="hint" id="hint-${t}"></span>
+        <div class="pushbox">
+          <div class="bt">📲 Куда лить на этот экран (настройки камеры/приложения):</div>
+          <div class="kv"><span class="k">URL</span><code>${RTMP_PUSH_URL}</code><button class="cp" id="cpurl-${t}">копировать</button></div>
+          <div class="kv"><span class="k">Ключ</span><code class="key">${n}</code><button class="cp" id="cpkey-${t}">копировать</button></div>
+          <div class="warn">URL — со слэшем «/» на конце; в поле «ключ» — только цифра ${n}.</div>
+        </div>
+        <div class="platbox">
+          <div class="bt">🔌 Куда транслируем с этого экрана (площадки):</div>
+          <div id="prows-${t}"></div>
+          <div>
+            <button class="addrow" id="add-${t}">➕ Площадка</button>
+            <button class="save" id="save-${t}">Сохранить площадки</button>
+            <span class="msg" id="msg-${t}"></span>
+          </div>
         </div>
         <div class="out">Выход (то, что видят площадки): <b id="mode-${t}" style="color:var(--txt)">…</b></div>
         <div class="meta" id="meta-${t}">разрешение: — · входящий: — Мбит/с</div>
-        <a class="btn" id="pv-${t}" href="#">Показать живое видео</a>
-        <a class="btn" id="op-${t}" href="#" target="_blank">Открыть в новой вкладке</a>
-        <a class="btn ctl-end" id="end-${t}" href="#" title="Штатно завершить: площадка покажет «трансляция окончена»">Завершить</a>
-        <a class="btn ctl-resume" id="res-${t}" href="#" title="Снова держать выход (live/заставка)">Возобновить</a>
+        <div>
+          <a class="btn" id="pv-${t}" href="#">Показать живое видео</a>
+          <a class="btn" id="op-${t}" href="#" target="_blank">Открыть в новой вкладке</a>
+          <a class="btn ctl-end" id="end-${t}" href="#" title="Штатно завершить: площадка покажет «трансляция окончена»">Завершить</a>
+          <a class="btn ctl-resume" id="res-${t}" href="#" title="Снова держать выход (live/заставка)">Возобновить</a>
+        </div>
       `;
       grid.appendChild(card);
       document.getElementById('end-' + t).onclick = (e) => { e.preventDefault(); ctl('end', t); };
       document.getElementById('res-' + t).onclick = (e) => { e.preventDefault(); ctl('resume', t); };
-      document.getElementById('src-' + t).onchange = saveRoutes;
+      document.getElementById('lab-' + t).onchange = () => saveLabel(t);
+      document.getElementById('cpurl-' + t).onclick = () => copyText(RTMP_PUSH_URL, document.getElementById('cpurl-' + t));
+      document.getElementById('cpkey-' + t).onclick = () => copyText(String(num(t)), document.getElementById('cpkey-' + t));
+      document.getElementById('add-' + t).onclick = () => { ROWS.push({ tatami: t, plat: 'vk', val: '', enabled: false }); renderPlats(); };
+      document.getElementById('save-' + t).onclick = () => saveOutputs(t);
     });
 
     function setBadge(el, cls, txt) { el.className = 'badge ' + cls; el.textContent = txt; }
 
-    // Configured routes (operator's choice) and the supervisor's resolved
-    // assignment (what is actually feeding each screen right now).
-    let ROUTES = {}, RESOLVED = {};
+    // Clipboard without HTTPS context (panel is served over plain http on LAN).
+    function copyText(txt, btn) {
+      const done = () => { btn.textContent = '✓ скопировано'; setTimeout(() => (btn.textContent = 'копировать'), 1500); };
+      const fallback = () => {
+        const ta = document.createElement('textarea');
+        ta.value = txt; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        ta.remove(); done();
+      };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(txt).then(done, fallback);
+      else fallback();
+    }
 
+    // ---- Live status tick ------------------------------------------------------
     async function tick() {
       let data;
       try {
         const r = await fetch('/v3/paths/list', { cache: 'no-store' });
         data = (await r.json()).items;
       } catch (e) {
-        TATAMIS.forEach((t) => setBadge(document.getElementById('in-' + t), 'offline', 'API DOWN'));
+        LETTERS.forEach((t) => setBadge(document.getElementById('in-' + t), 'offline', 'API DOWN'));
         return;
       }
       const byName = {};
@@ -134,52 +180,48 @@
 
       let ctlstate = {};
       try { ctlstate = await (await fetch('/ctl/state', { cache: 'no-store' })).json(); } catch (e) {}
+      // Captions come from the server (another operator may have changed them);
+      // never stomp on an input the operator is typing in right now.
       try {
-        const rr = await (await fetch('/ctl/routes', { cache: 'no-store' })).json();
-        ROUTES = rr.routes || {}; RESOLVED = rr.resolved || {};
+        const ll = await (await fetch('/ctl/labels', { cache: 'no-store' })).json();
+        LETTERS.forEach((t) => {
+          LABELS[t] = ll[t] || '';
+          const el = document.getElementById('lab-' + t);
+          if (document.activeElement !== el) el.value = LABELS[t];
+        });
       } catch (e) {}
 
-      // Which letters are already claimed by a live source on some screen?
-      const used = new Set(Object.values(RESOLVED).filter(Boolean));
-
-      TATAMIS.forEach((t) => {
-        const src = RESOLVED[t] !== undefined ? RESOLVED[t] : (ROUTES[t] && ROUTES[t] !== 'auto' ? ROUTES[t] : null);
-        const inp = src ? byName['tatami/' + src] : null;
+      LETTERS.forEach((t) => {
+        const n = num(t);
+        const inp = byName['tatami/' + n];
         const out = byName['broadcast/' + t];
         const inOnline = inp && inp.online;
         const outOnline = out && out.online;
         const ended = ctlstate[t] === 'ended';
 
-        // Source chip + select (only touch the select when not focused, so the
-        // operator's open dropdown is never reset under their hand).
-        const chip = document.getElementById('chip-' + t);
-        chip.textContent = src ? '← ТАТАМИ ' + src.toUpperCase() : 'СВОБОДЕН';
-        chip.className = 'dest' + (src ? ' pyt' : '');
-        chip.style.cssText = src ? '' : 'opacity:.5';
-        const sel = document.getElementById('src-' + t);
-        if (document.activeElement !== sel) sel.value = ROUTES[t] || 'auto';
-
-        // Input badge reflects the SOURCE tatami, not the screen letter.
+        // Input badge: key N is the screen's own key - live or free.
         const inB = document.getElementById('in-' + t);
-        if (inOnline) setBadge(inB, 'live', 'Вход LIVE');
-        else if (src) setBadge(inB, 'offline', 'Вход OFF');
-        else setBadge(inB, 'offline', 'СВОБОДЕН');
+        if (inOnline) setBadge(inB, 'live', 'ИДЕТ · ключ ' + n);
+        else setBadge(inB, 'offline', 'СВОБОДЕН · ключ ' + n);
 
         // Output badge (what platforms actually receive)
         const outB = document.getElementById('out-' + t);
         const modeEl = document.getElementById('mode-' + t);
         if (ended) { setBadge(outB, 'offline', 'ЗАВЕРШЕНО'); modeEl.textContent = 'ЗАВЕРШЕНО (штатно, оператор)'; }
-        else if (outOnline && inOnline) { setBadge(outB, 'live', 'Выход LIVE'); modeEl.textContent = 'LIVE (живое видео' + (src !== t ? ' с татами ' + src.toUpperCase() : '') + ')'; }
+        else if (outOnline && inOnline) { setBadge(outB, 'live', 'Выход LIVE'); modeEl.textContent = 'LIVE (живое видео, ключ ' + n + ')'; }
         else if (outOnline && !inOnline) { setBadge(outB, 'fallback', 'Выход FALLBACK'); modeEl.textContent = 'FALLBACK (заставка)'; }
         else { setBadge(outB, 'offline', 'Выход OFF'); modeEl.textContent = 'OFFLINE'; }
 
-        // Free screen: show the operator exactly where to push, with the
-        // letters that are still unclaimed - no letter hunting in the docs.
-        const hint = document.getElementById('hint-' + t);
-        if (!src && !ended) {
-          const free = TATAMIS.filter((x) => !used.has(x));
-          hint.textContent = `лей на rtmp://${location.hostname}:1935/tatami/ · ключ: ${free.join(', ') || 'все заняты'}`;
-        } else hint.textContent = '';
+        // Header chip: which platforms are wired to this screen right now.
+        const chip = document.getElementById('chip-' + t);
+        const act = ROWS.filter((r) => r.tatami === t && r.enabled && (r.val || '').trim());
+        if (act.length) {
+          chip.textContent = act.map((r) => PLATFORMS[r.plat].name.replace(' Video', '')).join(' · ');
+          chip.className = 'dest ' + (PLATFORMS[act[0].plat].cls || '');
+        } else {
+          chip.textContent = ended ? 'завершено' : 'без площадки';
+          chip.className = 'dest off';
+        }
 
         // Operator control buttons: enable the relevant one for the current intent.
         document.getElementById('end-' + t).setAttribute('aria-disabled', ended ? 'true' : 'false');
@@ -218,33 +260,19 @@
       });
     }
 
-    // Push the whole screen->source map built from the card selects.
-    async function saveRoutes() {
-      const routes = {};
-      TATAMIS.forEach((t) => { routes[t] = document.getElementById('src-' + t).value; });
+    // ---- Screen captions (display-only tatami/tournament names) ---------------
+    async function saveLabel(t) {
+      const v = document.getElementById('lab-' + t).value.trim();
       try {
-        const r = await fetch('/ctl/routes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ routes }) });
+        const r = await fetch('/ctl/labels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: { [t]: v } }) });
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
-          alert('Маршрут не сохранён: ' + ((d.errors || [d.error || 'ошибка']).join(' · ')));
+          alert('Подпись не сохранена: ' + ((d.errors || [d.error || 'ошибка']).join(' · ')));
         }
-        tick();
       } catch (e) { /* next tick shows API DOWN if the server is unreachable */ }
     }
 
-    tick();
-    setInterval(tick, 2000);
-
-    // ---- Platform outputs editor (VK/YouTube keys), served by /ctl/outputs ----
-    // Several platforms may share ONE tatami: rows are free-form, keyed by
-    // nothing; each row = {tatami, plat, val, enabled} -> one line in the file.
-    const PLATFORMS = {
-      vk:     { name: 'VK Video', base: 'rtmp://ovsu.okcdn.ru/input/' },
-      yt:     { name: 'YouTube',  base: 'rtmp://a.rtmp.youtube.com/live2/' },
-      custom: { name: 'Другая (полный URL)', base: null }
-    };
-    let ROWS = [];
-
+    // ---- Platform rows, edited INSIDE each card --------------------------------
     function splitDest(dest) {
       dest = (dest || '').trim();
       for (const k of ['vk', 'yt']) {
@@ -298,56 +326,57 @@
           return { tatami: it.tatami, plat: m.plat, val: m.val, enabled: !!it.enabled };
         });
       } catch (e) { ROWS = []; }
-      renderOutputs();
+      renderPlats();
     }
 
-    function renderOutputs() {
-      const box = document.getElementById('ows'); if (!box) return;
-      box.innerHTML = '';
-      ROWS.forEach((r, i) => {
-        const opts = Object.entries(PLATFORMS)
-          .map(([k, v]) => `<option value="${k}"${k === r.plat ? ' selected' : ''}>${v.name}</option>`).join('');
-        const tOpts = TATAMIS
-          .map((t) => `<option value="${t}"${t === r.tatami ? ' selected' : ''}>${t.toUpperCase()}</option>`).join('');
-        const status = r.enabled ? 'активно' : (r.val ? 'выключено' : 'не задано');
-        const row = document.createElement('div');
-        row.className = 'ow';
-        row.innerHTML =
-          `<span class="lab">ТАТАМИ</span>` +
-          `<select class="tsel">${tOpts}</select>` +
-          `<select class="psel">${opts}</select>` +
-          `<input class="dest" placeholder="${r.plat === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)'}" value="${(r.val || '').replace(/"/g, '&quot;')}">` +
-          `<label class="en"><input type="checkbox" class="een"${r.enabled ? ' checked' : ''}> вкл</label>` +
-          `<span class="status">${status}</span>` +
-          `<button class="rm" title="Удалить строку">✕</button>` +
-          `<div class="rowerr"></div>`;
-        const sel = row.querySelector('.psel'), inp = row.querySelector('.dest'), errEl = row.querySelector('.rowerr');
-        const liveCheck = () => {
-          ROWS[i].val = inp.value.trim();   // write DOM -> state (save reads ROWS)
-          ROWS[i].plat = sel.value;
-          const err = rowError(ROWS[i]);
-          inp.classList.toggle('bad', !!err);
-          errEl.textContent = err || '';
-        };
-        inp.oninput = liveCheck;
-        sel.onchange = () => {
-          inp.placeholder = sel.value === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)';
-          liveCheck();
-        };
-        row.querySelector('.tsel').onchange = (e) => { ROWS[i].tatami = e.target.value; };
-        row.querySelector('.een').onchange = (e) => { ROWS[i].enabled = e.target.checked; };
-        row.querySelector('.rm').onclick = () => { ROWS.splice(i, 1); renderOutputs(); };
-        box.appendChild(row);
+    // Render each card's platform rows from the shared ROWS state. Called only
+    // on structural changes (load/add/remove/save) - typing never re-renders.
+    function renderPlats() {
+      LETTERS.forEach((t) => {
+        const box = document.getElementById('prows-' + t);
+        box.innerHTML = '';
+        let count = 0;
+        ROWS.forEach((r, i) => {
+          if (r.tatami !== t) return;
+          count++;
+          const opts = Object.entries(PLATFORMS)
+            .map(([k, v]) => `<option value="${k}"${k === r.plat ? ' selected' : ''}>${v.name}</option>`).join('');
+          const row = document.createElement('div');
+          row.className = 'prow';
+          row.innerHTML =
+            `<select class="psel">${opts}</select>` +
+            `<input class="dest" placeholder="${r.plat === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)'}" value="${(r.val || '').replace(/"/g, '&quot;')}">` +
+            `<label class="en"><input type="checkbox" class="een"${r.enabled ? ' checked' : ''}> вкл</label>` +
+            `<button class="rm" title="Удалить строку">✕</button>` +
+            `<div class="rowerr"></div>`;
+          const sel = row.querySelector('.psel'), inp = row.querySelector('.dest'), errEl = row.querySelector('.rowerr');
+          const liveCheck = () => {
+            ROWS[i].val = inp.value.trim();   // write DOM -> state (save reads ROWS)
+            ROWS[i].plat = sel.value;
+            const err = rowError(ROWS[i]);
+            inp.classList.toggle('bad', !!err);
+            errEl.textContent = err || '';
+          };
+          inp.oninput = liveCheck;
+          sel.onchange = () => {
+            inp.placeholder = sel.value === 'custom' ? 'rtmp://… полностью' : 'вставь ключ площадки (stream key)';
+            liveCheck();
+          };
+          row.querySelector('.een').onchange = (e) => { ROWS[i].enabled = e.target.checked; };
+          row.querySelector('.rm').onclick = () => { ROWS.splice(i, 1); renderPlats(); };
+          box.appendChild(row);
+        });
+        if (!count) {
+          const d = document.createElement('div');
+          d.className = 'empty';
+          d.textContent = 'площадка не выбрана — экран никуда не ретранслируется';
+          box.appendChild(d);
+        }
       });
-      const add = document.createElement('button');
-      add.className = 'addrow'; add.id = 'addOut';
-      add.textContent = '➕ Добавить площадку (можно несколько на одно татами)';
-      add.onclick = () => { ROWS.push({ tatami: 'a', plat: 'vk', val: '', enabled: false }); renderOutputs(); };
-      box.appendChild(add);
     }
 
-    async function saveOutputs() {
-      const msg = document.getElementById('outMsg');
+    async function saveOutputs(cardT) {
+      const msg = document.getElementById('msg-' + cardT);
       const errs = [];
       let repaired = 0;
       // Normalize in place (silently repairs base+URL pastes), then validate.
@@ -355,10 +384,10 @@
       ROWS.forEach((r) => {
         const n = normalizeRow(r);
         const err = rowError(r);
-        if (err && r.enabled) errs.push(`TATAMI ${r.tatami.toUpperCase()}: ${err}`);
+        if (err && r.enabled) errs.push(`ЭКРАН ${num(r.tatami)}: ${err}`);
         else if (n.fixed && r.val) repaired++;
       });
-      renderOutputs(); // show normalized values + red marks
+      renderPlats(); // show normalized values + red marks
       if (errs.length) {
         msg.textContent = '✗ не сохранено: ' + errs.join(' · ');
         msg.style.color = '#f87171';
@@ -383,17 +412,18 @@
           const m = splitDest(it.dest);
           return { tatami: it.tatami, plat: m.plat, val: m.val, enabled: !!it.enabled };
         });
-        renderOutputs();
+        renderPlats();
         msg.textContent = '✓ сохранено — реле применит ~3 сек'
           + (repaired ? ` (исправлено вставленных URL вместо ключа: ${repaired})` : '');
         setTimeout(() => (msg.textContent = ''), 8000);
       } catch (e) { msg.textContent = '✗ ошибка сохранения'; msg.style.color = '#f87171'; }
     }
 
-    document.getElementById('saveOut').onclick = saveOutputs;
+    tick();
+    setInterval(tick, 2000);
     loadOutputs();
 
-    // Call the supervisor control server (proxied at /ctl/) to end/resume a tatami.
+    // Call the supervisor control server (proxied at /ctl/) to end/resume a screen.
     async function ctl(action, t) {
       try {
         await fetch('/ctl/' + action + '/' + t, { method: 'POST', cache: 'no-store' });

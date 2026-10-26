@@ -1,5 +1,5 @@
-# Launches 8 synthetic RTMP test streams (fake cameras) into MediaMTX tatami/a..h.
-# Each stream has a distinct hue + resolution so tatami are visually distinguishable.
+# Launches 8 synthetic RTMP test streams (fake cameras) into MediaMTX tatami/1..8.
+# Each stream has a distinct hue + resolution so screens are visually distinguishable.
 # These are placeholders for real phones; remove this once TournamentLive devices push in.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File start-test-streams.ps1
@@ -10,14 +10,14 @@ param(
 )
 
 $defs = @(
-    @{ path = 'a'; label = 'TATAMI A'; w = 1280; h = 720; hue = 0 },
-    @{ path = 'b'; label = 'TATAMI B'; w = 1280; h = 720; hue = 72 },
-    @{ path = 'c'; label = 'TATAMI C'; w = 640;  h = 480; hue = 144 },
-    @{ path = 'd'; label = 'TATAMI D'; w = 640;  h = 480; hue = 216 },
-    @{ path = 'e'; label = 'TATAMI E'; w = 640;  h = 480; hue = 288 },
-    @{ path = 'f'; label = 'TATAMI F'; w = 640;  h = 480; hue = 36 },
-    @{ path = 'g'; label = 'TATAMI G'; w = 640;  h = 480; hue = 108 },
-    @{ path = 'h'; label = 'TATAMI H'; w = 640;  h = 480; hue = 180 }
+    @{ path = '1'; label = 'SCREEN 1'; w = 1280; h = 720; hue = 0 },
+    @{ path = '2'; label = 'SCREEN 2'; w = 1280; h = 720; hue = 72 },
+    @{ path = '3'; label = 'SCREEN 3'; w = 640;  h = 480; hue = 144 },
+    @{ path = '4'; label = 'SCREEN 4'; w = 640;  h = 480; hue = 216 },
+    @{ path = '5'; label = 'SCREEN 5'; w = 640;  h = 480; hue = 288 },
+    @{ path = '6'; label = 'SCREEN 6'; w = 640;  h = 480; hue = 36 },
+    @{ path = '7'; label = 'SCREEN 7'; w = 640;  h = 480; hue = 108 },
+    @{ path = '8'; label = 'SCREEN 8'; w = 640;  h = 480; hue = 180 }
 )
 
 foreach ($d in $defs) {
@@ -40,4 +40,4 @@ foreach ($d in $defs) {
 }
 
 Write-Host ""
-Write-Host "All 8 test streams launched. Preview at http://localhost:8888/tatami/<a..h>"
+Write-Host "All 8 test streams launched. Preview at http://localhost:8888/tatami/<1..8>"

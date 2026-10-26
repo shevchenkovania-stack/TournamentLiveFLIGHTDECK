@@ -17,7 +17,7 @@
 </head>
 <body>
   <h1>QR-конфиг → локальный MediaMTX</h1>
-  <p class="hint">Впиши IP этого ПК (той же сети, что и телефон) и букву татами. Отсканируй QR экраном сканера в приложении TournamentLive.</p>
+  <p class="hint">Впиши IP этого ПК (той же сети, что и телефон) и номер экрана (ключ 1..8). Отсканируй QR экраном сканера в приложении TournamentLive. Ключ N = Экран N в рестримере.</p>
 
   <div class="row">
     <div>
@@ -25,16 +25,16 @@
       <input id="ip" size="18" value="192.168.50.164" />
     </div>
     <div>
-      <label>Татами (буква пути)</label>
+      <label>Ключ (номер экрана)</label>
       <select id="key">
-        <option value="a">A</option>
-        <option value="b" selected>B</option>
-        <option value="c">C</option>
-        <option value="d">D</option>
-        <option value="e">E</option>
-        <option value="f">F</option>
-        <option value="g">G</option>
-        <option value="h">H</option>
+        <option value="1" selected>1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
       </select>
     </div>
     <div>
@@ -60,10 +60,10 @@
       const k  = $('key').value;
       const res = $('res').value;
       return {
-        tatami_name: 'TATAMI ' + k.toUpperCase(),
+        tatami_name: 'SCREEN ' + k,
         hosting_provider: 'local',
         stream_key: k,
-        // getFullStreamUrl = stream_url + stream_key  =>  rtmp://ip:1935/tatami/<k>
+        // getFullStreamUrl = stream_url + stream_key  =>  rtmp://ip:1935/tatami/<N>
         stream_url: `rtmp://${ip}:1935/tatami/`,
         overlay_url: '',
         overlay_position: '',

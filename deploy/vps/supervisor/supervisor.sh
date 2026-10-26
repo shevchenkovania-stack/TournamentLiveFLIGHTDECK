@@ -1,20 +1,21 @@
 #!/bin/sh
 # TournamentLive stream supervisor — Linux/container port of supervisor.ps1.
 #
-# Screens are DECOUPLED from tatami: each broadcast/<screen> is fed from a
-# SOURCE tatami chosen by the route table (ctl.py /routes), not by letter:
-#   "<screen>=<letter>"  pin that tatami input to the screen
-#   "<screen>=auto"      (default) take the first online input not pinned
-#                        and not claimed by an earlier auto screen
-#   source offline/none  -> loop the fallback clip (the source's clip when a
-#   source is known, otherwise the screen's own)
-# Platforms (VK/YouTube) and the cockpit read broadcast/<x>, so the outbound
-# publication survives an input drop (only a sub-second feeder swap).
+# NUMBERED-KEY model (zero screen/tatami ambiguity):
+#   Screen N (internally the letter a..h = screens 1..8) shows EXACTLY what
+#   arrives on key N: rtmp://<host>:1935/tatami/ + key N. Nothing to route,
+#   nothing to claim - the operator reads key N off the card of screen N.
+#     key N online   -> feed broadcast/<letter> from tatami/<N>
+#     key N offline  -> loop that screen's fallback clip
+#   The "tatami / tournament" name is a free-text label in the panel only;
+#   the infrastructure never depends on it (ten mats may all be called "A").
+# Platforms (VK/YouTube) read broadcast/<x>, so the outbound publication
+# survives an input drop (only a sub-second feeder swap).
 #
 # Idempotent: exactly one feeder per screen; a feeder is (re)started only when
-# the desired mode (source included) changes or the feeder process has exited.
+# the desired mode changes or the feeder process has exited.
 #
-# Runs inside the jrottenberg/ffmpeg image (busybox sh + curl + ffmpeg present).
+# Runs inside the supervisor image (busybox sh + curl + ffmpeg + python3).
 
 set -u
 
@@ -23,15 +24,12 @@ PORT="${MEDIAMTX_RTMP_PORT:-1935}"
 API_PORT="${MEDIAMTX_API_PORT:-9997}"
 USER_="${MTX_ADMIN_USER:-admin}"
 PASS_="${MTX_ADMIN_PASSWORD:-admin_password_CHANGE_ME}"
+# Screen letters: a..h == screens 1..8 (broadcast/<letter>, fallback_<letter>.mp4).
 TATAMIS="${TATAMIS:-a b c d e f g h}"
 FDIR="${FALLBACK_DIR:-/fallback}"
 INT="${INTERVAL_SEC:-2}"
 INTENT_DIR="${INTENT_DIR:-/control}"
 CTL_PORT="${CTL_PORT:-8090}"
-# Route table (written by ctl.py) and resolved assignment (written here).
-# Both live on the shared /outputs volume so ctl.py can serve them to the panel.
-ROUTES_FILE="${ROUTES_FILE:-$INTENT_DIR/routes.conf}"
-RESOLVED_FILE="${RESOLVED_FILE:-$INTENT_DIR/routes.resolved}"
 RTMP="rtmp://${HOST}:${PORT}"
 # Anonymous API when no admin password is set (local MVP grants 'any' the api
 # action); authenticated when MTX_ADMIN_PASSWORD is provided (VPS).
@@ -44,14 +42,17 @@ fi
 STATE_DIR="$(mktemp -d)"
 mkdir -p "$INTENT_DIR"
 
-# Operator control server (panel END/RESUME buttons write intent files here).
+# Operator control server (panel END/RESUME buttons + labels write files here).
 python3 /supervisor/ctl.py "$INTENT_DIR" "$CTL_PORT" &
 CTL_PID=$!
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
-# Intent for a tatami: 'ended' (graceful stop) or 'hold' (default: keep alive).
+# Intent for a screen: 'ended' (graceful stop) or 'hold' (default: keep alive).
 intent_of() { if [ -f "$INTENT_DIR/$1" ]; then cat "$INTENT_DIR/$1"; else echo hold; fi; }
+
+# Screen letter -> its number (a=1 .. h=8). The ingest key operators use.
+no_of() { printf '%s' "$1" | tr 'abcdefgh' '12345678'; }
 
 # Returns 0 if the given MediaMTX path is online.
 is_online() {
@@ -61,13 +62,6 @@ is_online() {
 
 mode_file() { printf '%s/%s.mode' "$STATE_DIR" "$1"; }
 pid_file()  { printf '%s/%s.pid'  "$STATE_DIR" "$1"; }
-
-# Configured route for a screen: a tatami letter or 'auto' (default).
-route_of() {
-  r=""
-  [ -f "$ROUTES_FILE" ] && r=$(grep "^$1=" "$ROUTES_FILE" 2>/dev/null | tail -n1 | cut -d= -f2)
-  [ -n "$r" ] && printf '%s' "$r" || printf 'auto'
-}
 
 start_feeder() {
   s="$1"; want="$2"
@@ -99,56 +93,28 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-log "supervisor up: screens=[$TATAMIS] api=${API##*@} interval=${INT}s routes=$ROUTES_FILE"
+log "supervisor up: screens=[$TATAMIS] keys=1..8 api=${API##*@} interval=${INT}s"
 
 while :; do
-  # 1) which inputs are online right now (one API call per input)
-  ONLINE=" "
-  for x in $TATAMIS; do
-    is_online "tatami/$x" && ONLINE="$ONLINE$x "
-  done
+  for s in $TATAMIS; do
+    n=$(no_of "$s")
 
-  # 2) resolve routes: pinned screens claim their source first, then 'auto'
-  #    screens take any still-free online input, in screen order.
-  CLAIMED=" "
-  for s in $TATAMIS; do
-    r=$(route_of "$s")
-    [ "$r" = auto ] || CLAIMED="$CLAIMED$r "
-  done
-  : > "${RESOLVED_FILE}.tmp"
-  for s in $TATAMIS; do
-    r=$(route_of "$s")
-    if [ "$r" = auto ]; then
-      r=""
-      for x in $TATAMIS; do
-        case "$CLAIMED" in *" $x "*) continue ;; esac
-        case "$ONLINE"  in *" $x "*) r="$x"; CLAIMED="$CLAIMED$x "; break ;; esac
-      done
-    fi
-    echo "$s=$r" >> "${RESOLVED_FILE}.tmp"
-  done
-  mv "${RESOLVED_FILE}.tmp" "$RESOLVED_FILE" 2>/dev/null
-
-  # 3) one feeder per screen, live from its resolved source or the fallback
-  for s in $TATAMIS; do
     if [ "$(intent_of "$s")" = ended ]; then
       # Graceful end: stop feeding broadcast/<s> so the relay closes its
       # platform connection and the platform shows 'broadcast ended'.
       if alive "$s"; then
         kill "$(cat "$(pid_file "$s")")" 2>/dev/null
         echo "" > "$(mode_file "$s")"
-        log "screen/$s : operator END -> broadcast/$s taken offline (platform ends)"
+        log "screen/$s (key $n): operator END -> broadcast/$s taken offline (platform ends)"
       fi
       continue
     fi
 
-    r=$(grep "^$s=" "$RESOLVED_FILE" 2>/dev/null | tail -n1 | cut -d= -f2)
-    want=""
-    if [ -n "$r" ]; then
-      case "$ONLINE" in *" $r "*) want="live:$r" ;; esac
-    fi
-    if [ -z "$want" ]; then
-      fb="fallback_${r:-$s}.mp4"; [ -f "$FDIR/$fb" ] || fb="fallback_$s.mp4"
+    if is_online "tatami/$n"; then
+      want="live:$n"
+    else
+      fb="fallback_$s.mp4"
+      [ -f "$FDIR/$fb" ] || fb="fallback_a.mp4"
       want="fallback:$fb"
     fi
 
@@ -166,7 +132,7 @@ while :; do
 
     start_feeder "$s" "$want"
     echo "$want" > "$(mode_file "$s")"
-    log "screen/$s : ${cur:-none} -> ${want} (feeding broadcast/$s, pid=$(cat "$(pid_file "$s")"))"
+    log "screen/$s (key $n): ${cur:-none} -> ${want} (feeding broadcast/$s, pid=$(cat "$(pid_file "$s")"))"
   done
   sleep "$INT"
 done

@@ -12,11 +12,14 @@
 #                                 (doubled URL, spaces, missing key) rejects the
 #                                 WHOLE save with {"errors":[...]}, so a broken
 #                                 key can never silently reach the relayer.
-#   GET  /routes                -> {"routes":{"a":"auto",...}, "resolved":{"a":"c",...}}
-#   POST /routes                -> body {"routes":{"<screen>":"<letter>|auto",...}};
-#                                 decouples a screen (broadcast/<x>) from its source
-#                                 tatami. 'auto' takes any free online input.
-#                                 'resolved' is what the supervisor actually assigned.
+#   GET  /labels                -> {"a":"Татами A · Кубок", ...} (operator captions)
+#   POST /labels                -> body {"label":{"<screen>":"<text>"}}; merges the
+#                                 caption into the labels file. The caption is a
+#                                 DISPLAY name only - routing never depends on it.
+#
+# NUMBERED-KEY model: screen letters a..h are screens 1..8 everywhere the
+# operator looks (errors, panel cards). Key N feeds screen N; the letter stays
+# as the internal path name (broadcast/<letter>, outputs file).
 #
 # Outputs file format (one entry per line), read by the relayer container:
 #   <letter> <full-rtmp-url-with-key>        (enabled)
@@ -33,16 +36,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # file rewrites (lock) and give each writer its own tmp file, so two saves
 # (double-click, panel + manual) can never interleave into a corrupted file.
 OUTPUTS_LOCK = threading.Lock()
-ROUTES_LOCK = threading.Lock()
+LABELS_LOCK = threading.Lock()
 
 INTENT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/control"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8090
 TATAMIS = [t for t in (os.environ.get("TATAMIS") or "a b c d e f g h").split()]
 OUTPUTS_PATH = os.environ.get("OUTPUTS_PATH", "/outputs/outputs.local.conf")
-# Screen->source routing table (we write it; the supervisor reads it every loop)
-# and the resolved assignment the supervisor publishes for display.
-ROUTES_PATH = os.environ.get("ROUTES_FILE", os.path.join(INTENT_DIR, "routes.conf"))
-RESOLVED_PATH = os.environ.get("RESOLVED_FILE", os.path.join(INTENT_DIR, "routes.resolved"))
+# Operator captions ("Татами A · Кубок района") shown on each screen card.
+LABELS_PATH = os.environ.get("LABELS_FILE", os.path.join(INTENT_DIR, "labels.json"))
 
 # <letter> <dest>, where a leading '#' marks a disabled entry.
 LINE_RE = re.compile(r"^\s*#?\s*([a-z])\s+(\S.*)$")
@@ -54,6 +55,13 @@ BASE_NAMES = {
     "rtmp://ovsu.okcdn.ru/input/": "VK",
     YT_BASE: "YouTube",
 }
+
+
+def scr_name(t):
+    """Operator-facing screen name: letter a..h -> 'ЭКРАН 1..8'."""
+    if t in TATAMIS:
+        return f"ЭКРАН {TATAMIS.index(t) + 1}"
+    return f"ЭКРАН? {t.upper()}"
 
 
 def dest_label(dest):
@@ -74,19 +82,19 @@ def validate_dest(t, dest):
     if not dest:
         return None  # empty row: skipped on write
     if dest.count("://") > 1 or " " in dest or "\t" in dest:
-        return (f"TATAMI {t.upper()} ({dest_label(dest)}): в адресе два RTMP URL подряд — "
+        return (f"{scr_name(t)} ({dest_label(dest)}): в адресе два RTMP URL подряд — "
                 "в поле «ключ» нужен ТОЛЬКО stream key без rtmp://")
     if not dest.startswith(("rtmp://", "rtmps://", "srt://")):
-        return f"TATAMI {t.upper()}: адрес должен начинаться с rtmp:// (полный URL)"
+        return f"{scr_name(t)}: адрес должен начинаться с rtmp:// (полный URL)"
     if "ВСТАВЬ" in dest:
-        return (f"TATAMI {t.upper()} ({dest_label(dest)}): это заглушка вместо ключа — "
+        return (f"{scr_name(t)} ({dest_label(dest)}): это заглушка вместо ключа — "
                 "вставь настоящий stream key")
     key = dest.rsplit("/", 1)[-1]
     if dest.startswith(YT_BASE) and key.rstrip("/") == "live2":
-        return ("TATAMI " + t.upper() + " (YouTube): нет stream key — вставь только ключ "
+        return (f"{scr_name(t)} (YouTube): нет stream key — вставь только ключ "
                 "вида xxxx-xxxx-xxxx-xxxx-xxxx, без rtmp://")
     if not key:
-        return f"TATAMI {t.upper()}: в адресе нет ключа после последнего /"
+        return f"{scr_name(t)}: в адресе нет ключа после последнего /"
     return None
 
 
@@ -150,7 +158,7 @@ def write_outputs(items):
             errors.append(err)
             continue
         if dest and (t, dest) in seen:
-            errors.append(f"TATAMI {t.upper()}: одинаковая строка площадки повторяется в списке")
+            errors.append(f"{scr_name(t)}: одинаковая строка площадки повторяется в списке")
             continue
         if dest:
             seen.add((t, dest))
@@ -159,8 +167,8 @@ def write_outputs(items):
 
     header = (
         "# Platform destinations - managed from the web panel (Cockpit).\n"
-        "# Format: <tatami letter> <full rtmp url with key>. A '#' line = disabled.\n"
-        "# Several lines may share one letter (VK + YouTube on the same tatami).\n"
+        "# Format: <screen letter a..h = screens 1..8> <full rtmp url with key>.\n"
+        "# A '#' line = disabled. Several lines may share one letter (many platforms).\n"
         "# THIS FILE HOLDS LIVE KEYS - it is gitignored; do not commit.\n"
     )
     lines = [header]
@@ -199,73 +207,42 @@ def write_outputs(items):
     return read_outputs(), []
 
 
-ROUTE_LINE_RE = re.compile(r"^\s*([a-z])\s*=\s*([a-z]*)\s*$")
-
-
-def read_routes():
-    """Configured screen->source map; every screen present, default 'auto'."""
-    routes = {t: "auto" for t in TATAMIS}
+def read_labels():
+    """Operator captions per screen; missing file -> empty map."""
     try:
-        with open(ROUTES_PATH, encoding="utf-8-sig") as f:
-            for raw in f:
-                m = ROUTE_LINE_RE.match(raw)
-                if m and m.group(1) in routes:
-                    routes[m.group(1)] = m.group(2) or "auto"
-    except OSError:
-        pass
-    return routes
+        with open(LABELS_PATH, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if k in TATAMIS and isinstance(v, str)}
+    except (OSError, ValueError):
+        return {}
 
 
-def read_resolved():
-    """What the supervisor actually assigned this loop (empty source -> None)."""
-    res = {}
-    try:
-        with open(RESOLVED_PATH, encoding="utf-8-sig") as f:
-            for raw in f:
-                m = ROUTE_LINE_RE.match(raw)
-                if m:
-                    res[m.group(1)] = m.group(2) or None
-    except OSError:
-        pass
-    return res
-
-
-def write_routes(routes):
-    """Validate + persist the screen->source map. Returns (routes, errors)."""
+def write_labels(patch):
+    """Merge {screen: caption} into the labels file. Returns (labels, errors)."""
     errors = []
-    clean = {}
-    for t, src in routes.items():
-        t = (t or "").strip().lower()
-        src = (src or "auto").strip().lower()
+    for t, v in patch.items():
         if t not in TATAMIS:
             errors.append(f"неизвестный экран {t!r}")
-            continue
-        if src != "auto" and src not in TATAMIS:
-            errors.append(f"ЭКРАН {t.upper()}: источник должен быть буквой татами или auto")
-            continue
-        clean[t] = src
+        elif not isinstance(v, str) or len(v) > 120:
+            errors.append(f"{scr_name(t)}: подпись должна быть текстом до 120 символов")
     if errors:
-        return read_routes(), errors
-    header = (
-        "# Screen -> source routing, managed from the Flight Deck.\n"
-        "# <screen>=<tatami letter> pins the input; <screen>=auto takes any free one.\n"
-        "# Read by the supervisor every loop; safe to edit by hand.\n"
-    )
-    lines = [header] + [f"{t}={clean.get(t, 'auto')}\n" for t in TATAMIS]
-    tmp = f"{ROUTES_PATH}.tmp.{os.getpid()}.{time.time_ns()}"
-    with ROUTES_LOCK:
-        os.makedirs(os.path.dirname(ROUTES_PATH) or ".", exist_ok=True)
+        return read_labels(), errors
+    labels = read_labels()
+    labels.update({t: v.strip() for t, v in patch.items()})
+    tmp = f"{LABELS_PATH}.tmp.{os.getpid()}.{time.time_ns()}"
+    with LABELS_LOCK:
+        os.makedirs(os.path.dirname(LABELS_PATH) or ".", exist_ok=True)
         try:
             with open(tmp, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            os.replace(tmp, ROUTES_PATH)
+                json.dump(labels, f, ensure_ascii=False)
+            os.replace(tmp, LABELS_PATH)
         finally:
             try:
                 if os.path.exists(tmp):
                     os.remove(tmp)
             except OSError:
                 pass
-    return read_routes(), []
+    return read_labels(), []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -295,8 +272,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {t: intent_of(t) for t in TATAMIS})
         elif p == ["outputs"]:
             self._send(200, {"items": read_outputs()})
-        elif p == ["routes"]:
-            self._send(200, {"routes": read_routes(), "resolved": read_resolved()})
+        elif p == ["labels"]:
+            self._send(200, read_labels())
         else:
             self._send(404, {"error": "not found"})
 
@@ -315,18 +292,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "invalid outputs", "errors": errors})
             else:
                 self._send(200, {"items": entries, "errors": []})
-        elif p == ["routes"]:
+        elif p == ["labels"]:
             body = self._read_body()
-            routes = body.get("routes")
-            if not isinstance(routes, dict):
-                self._send(400, {"error": "expected {'routes':{screen:src,...}}"}); return
-            saved, errors = write_routes(routes)
+            patch = body.get("label")
+            if not isinstance(patch, dict):
+                self._send(400, {"error": "expected {'label':{screen:text,...}}"}); return
+            saved, errors = write_labels(patch)
             if errors:
-                self._send(400, {"error": "invalid routes", "errors": errors})
+                self._send(400, {"error": "invalid labels", "errors": errors})
             else:
-                self._send(200, {"routes": saved, "resolved": read_resolved()})
+                self._send(200, saved)
         else:
-            self._send(400, {"error": "use /end/<tatami>, /resume/<tatami>, /outputs or /routes"})
+            self._send(400, {"error": "use /end/<screen>, /resume/<screen>, /outputs or /labels"})
 
     def log_message(self, *args):
         pass

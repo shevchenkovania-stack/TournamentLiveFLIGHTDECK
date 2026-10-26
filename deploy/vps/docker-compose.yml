@@ -44,9 +44,8 @@ services:
       TATAMIS: "a b c d e f g h"
       FALLBACK_DIR: "/fallback"
       OUTPUTS_PATH: "/outputs/outputs.local.conf"
-      # Screen->source routing (decouples broadcast screens from tatami letters)
-      ROUTES_FILE: "/outputs/routes.conf"
-      RESOLVED_FILE: "/outputs/routes.resolved"
+      # Operator captions ("татами/турнир") persist next to the intent files.
+      LABELS_FILE: "/outputs/labels.json"
     volumes:
       - ./fallback:/fallback:ro
       # The cockpit edits platform keys here via the /ctl/outputs API; the
