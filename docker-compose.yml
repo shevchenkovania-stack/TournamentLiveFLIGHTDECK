@@ -53,6 +53,9 @@ services:
       FALLBACK_DIR: /fallback
       INTERVAL_SEC: "2"
       OUTPUTS_PATH: /outputs/outputs.local.conf
+      # Screen->source routing (decouples broadcast screens from tatami letters)
+      ROUTES_FILE: /outputs/routes.conf
+      RESOLVED_FILE: /outputs/routes.resolved
     volumes:
       - ./fallback:/fallback:ro
       # The panel edits platform keys here (writes outputs.local.conf); the

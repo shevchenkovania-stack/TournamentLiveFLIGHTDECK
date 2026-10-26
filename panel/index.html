@@ -39,6 +39,9 @@
     .btn[aria-disabled="true"] { opacity:.3; pointer-events:none; }
     .meta { color:var(--muted); font-size:12px; padding:0 14px 10px; }
     .out { display:flex; gap:10px; align-items:center; padding:2px 14px 12px; font-size:12px; color:var(--muted); }
+    .srcrow { display:flex; gap:8px; align-items:center; padding:0 14px 10px; font-size:12px; color:var(--muted); }
+    .srcrow select { background:#0f1115; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:4px 8px; font-size:12px; }
+    .srcrow .hint { flex:1; text-align:right; font-size:11px; }
     /* Platform outputs editor (VK/YouTube keys) */
     .outputs { margin:4px 22px; border:1px solid var(--line); border-radius:12px; background:var(--card); padding:14px 16px; }
     .outputs h2 { font-size:14px; margin:0 0 4px; font-weight:650; }
@@ -62,7 +65,7 @@
 <body>
   <header>
     <h1>TournamentLive <span style="color:var(--muted);font-weight:400">·</span> FLIGHT DECK</h1>
-    <span class="sub">Вход телефона (tatami) → выход на площадки (broadcast). Обновление каждые 2 сек.</span>
+    <span class="sub">Экраны не привязаны к татами: источник выбирается на карточке (Авто = первый свободный вход). Обновление каждые 2 сек.</span>
   </header>
   <div class="outputs">
     <h2>🔌 Площадки (куда ретранслируем)</h2>
@@ -77,14 +80,15 @@
     const TATAMIS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const grid = document.getElementById('grid');
 
-    // Build card skeleton once.
+    // Build card skeleton once. A "screen" (broadcast output) is decoupled from
+    // the tatami letter: its source is chosen per card (auto | a..h).
     TATAMIS.forEach((t) => {
       const card = document.createElement('div');
       card.className = 'card';
       card.id = 'card-' + t;
       card.innerHTML = `
         <div class="top">
-          <div class="name">TATAMI ${t.toUpperCase()}</div>
+          <div class="name">SCREEN ${t.toUpperCase()} <span class="dest" id="chip-${t}">…</span></div>
           <div class="badges">
             <span class="badge" id="in-${t}">…</span>
             <span class="badge" id="out-${t}">…</span>
@@ -93,19 +97,28 @@
         <div class="preview">
           <div class="ph" id="ph-${t}">Предпросмотр выключен для экономии CPU</div>
         </div>
-        <div class="out">Выход (то, что видят VK/YouTube): <b id="mode-${t}" style="color:var(--txt)">…</b></div>
+        <div class="srcrow">Источник:
+          <select id="src-${t}"><option value="auto">Авто</option>${TATAMIS.map((x) => `<option value="${x}">Татами ${x.toUpperCase()}</option>`).join('')}</select>
+          <span class="hint" id="hint-${t}"></span>
+        </div>
+        <div class="out">Выход (то, что видят площадки): <b id="mode-${t}" style="color:var(--txt)">…</b></div>
         <div class="meta" id="meta-${t}">разрешение: — · входящий: — Мбит/с</div>
         <a class="btn" id="pv-${t}" href="#">Показать живое видео</a>
         <a class="btn" id="op-${t}" href="#" target="_blank">Открыть в новой вкладке</a>
-        <a class="btn ctl-end" id="end-${t}" href="#" title="Штатно завершить: VK покажет «трансляция окончена»">Завершить</a>
+        <a class="btn ctl-end" id="end-${t}" href="#" title="Штатно завершить: площадка покажет «трансляция окончена»">Завершить</a>
         <a class="btn ctl-resume" id="res-${t}" href="#" title="Снова держать выход (live/заставка)">Возобновить</a>
       `;
       grid.appendChild(card);
       document.getElementById('end-' + t).onclick = (e) => { e.preventDefault(); ctl('end', t); };
       document.getElementById('res-' + t).onclick = (e) => { e.preventDefault(); ctl('resume', t); };
+      document.getElementById('src-' + t).onchange = saveRoutes;
     });
 
     function setBadge(el, cls, txt) { el.className = 'badge ' + cls; el.textContent = txt; }
+
+    // Configured routes (operator's choice) and the supervisor's resolved
+    // assignment (what is actually feeding each screen right now).
+    let ROUTES = {}, RESOLVED = {};
 
     async function tick() {
       let data;
@@ -121,32 +134,58 @@
 
       let ctlstate = {};
       try { ctlstate = await (await fetch('/ctl/state', { cache: 'no-store' })).json(); } catch (e) {}
+      try {
+        const rr = await (await fetch('/ctl/routes', { cache: 'no-store' })).json();
+        ROUTES = rr.routes || {}; RESOLVED = rr.resolved || {};
+      } catch (e) {}
+
+      // Which letters are already claimed by a live source on some screen?
+      const used = new Set(Object.values(RESOLVED).filter(Boolean));
 
       TATAMIS.forEach((t) => {
-        const inp = byName['tatami/' + t];
+        const src = RESOLVED[t] !== undefined ? RESOLVED[t] : (ROUTES[t] && ROUTES[t] !== 'auto' ? ROUTES[t] : null);
+        const inp = src ? byName['tatami/' + src] : null;
         const out = byName['broadcast/' + t];
         const inOnline = inp && inp.online;
         const outOnline = out && out.online;
         const ended = ctlstate[t] === 'ended';
 
-        // Input badge
+        // Source chip + select (only touch the select when not focused, so the
+        // operator's open dropdown is never reset under their hand).
+        const chip = document.getElementById('chip-' + t);
+        chip.textContent = src ? '← ТАТАМИ ' + src.toUpperCase() : 'СВОБОДЕН';
+        chip.className = 'dest' + (src ? ' pyt' : '');
+        chip.style.cssText = src ? '' : 'opacity:.5';
+        const sel = document.getElementById('src-' + t);
+        if (document.activeElement !== sel) sel.value = ROUTES[t] || 'auto';
+
+        // Input badge reflects the SOURCE tatami, not the screen letter.
         const inB = document.getElementById('in-' + t);
         if (inOnline) setBadge(inB, 'live', 'Вход LIVE');
-        else setBadge(inB, 'offline', 'Вход OFF');
+        else if (src) setBadge(inB, 'offline', 'Вход OFF');
+        else setBadge(inB, 'offline', 'СВОБОДЕН');
 
         // Output badge (what platforms actually receive)
         const outB = document.getElementById('out-' + t);
         const modeEl = document.getElementById('mode-' + t);
         if (ended) { setBadge(outB, 'offline', 'ЗАВЕРШЕНО'); modeEl.textContent = 'ЗАВЕРШЕНО (штатно, оператор)'; }
-        else if (outOnline && inOnline) { setBadge(outB, 'live', 'Выход LIVE'); modeEl.textContent = 'LIVE (живое видео)'; }
+        else if (outOnline && inOnline) { setBadge(outB, 'live', 'Выход LIVE'); modeEl.textContent = 'LIVE (живое видео' + (src !== t ? ' с татами ' + src.toUpperCase() : '') + ')'; }
         else if (outOnline && !inOnline) { setBadge(outB, 'fallback', 'Выход FALLBACK'); modeEl.textContent = 'FALLBACK (заставка)'; }
         else { setBadge(outB, 'offline', 'Выход OFF'); modeEl.textContent = 'OFFLINE'; }
+
+        // Free screen: show the operator exactly where to push, with the
+        // letters that are still unclaimed - no letter hunting in the docs.
+        const hint = document.getElementById('hint-' + t);
+        if (!src && !ended) {
+          const free = TATAMIS.filter((x) => !used.has(x));
+          hint.textContent = `лей на rtmp://${location.hostname}:1935/tatami/ · ключ: ${free.join(', ') || 'все заняты'}`;
+        } else hint.textContent = '';
 
         // Operator control buttons: enable the relevant one for the current intent.
         document.getElementById('end-' + t).setAttribute('aria-disabled', ended ? 'true' : 'false');
         document.getElementById('res-' + t).setAttribute('aria-disabled', ended ? 'false' : 'true');
 
-        // Resolution / bitrate meta from input when live
+        // Resolution / bitrate meta from the live input when present
         const meta = document.getElementById('meta-' + t);
         if (inOnline && inp.tracks2) {
           const v = inp.tracks2.find((x) => x.codec === 'H264' || x.codec === 'VP9' || x.codec === 'AV1');
@@ -177,6 +216,20 @@
           document.getElementById('card-' + t).querySelector('.preview').appendChild(f);
         };
       });
+    }
+
+    // Push the whole screen->source map built from the card selects.
+    async function saveRoutes() {
+      const routes = {};
+      TATAMIS.forEach((t) => { routes[t] = document.getElementById('src-' + t).value; });
+      try {
+        const r = await fetch('/ctl/routes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ routes }) });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          alert('Маршрут не сохранён: ' + ((d.errors || [d.error || 'ошибка']).join(' · ')));
+        }
+        tick();
+      } catch (e) { /* next tick shows API DOWN if the server is unreachable */ }
     }
 
     tick();
