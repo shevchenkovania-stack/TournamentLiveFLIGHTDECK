@@ -48,6 +48,21 @@ function Start-Feeder($t, $mode) {
 
 New-Item -ItemType Directory -Force -Path logs | Out-Null
 
+# Active screen count: outputs/screens.conf (the panel writes it via
+# /ctl/screens). No file -> 2 screens; the rest stay dormant, exactly
+# like the containerized supervisor on the VPS.
+function Get-ScreenCount {
+    $f = Join-Path $root 'outputs/screens.conf'
+    $n = 2
+    if (Test-Path $f) {
+        $v = ((Get-Content $f -TotalCount 1) -join '').Trim()
+        if ($v -match '^\d+$') { $n = [int]$v }
+    }
+    if ($n -lt 1) { $n = 1 }
+    if ($n -gt $Tatamis.Count) { $n = $Tatamis.Count }
+    return $n
+}
+
 $state = @{}
 foreach ($t in $Tatamis) { $state[$t] = @{ mode = $null; pid = $null } }
 
@@ -64,12 +79,24 @@ while ($true) {
         Log "API unreachable: $($_.Exception.Message) - assuming all offline"
     }
 
+    $cnt = Get-ScreenCount
     foreach ($t in $Tatamis) {
         $key      = [array]::IndexOf($Tatamis, $t) + 1
-        $isLive   = [bool]$online["tatami/$key"]
-        $desired  = if ($isLive) { 'live' } else { 'fallback' }
         $cur      = $state[$t]
         $alive    = ($cur.pid -and (Get-Process -Id $cur.pid -ErrorAction SilentlyContinue))
+
+        if ($key -gt $cnt) {
+            # Screen removed with '-' in the panel: stop its feeder.
+            if ($alive) {
+                Stop-Process -Id $cur.pid -Force -ErrorAction SilentlyContinue
+                $cur.mode = $null; $cur.pid = $null
+                Log "key $key -> screen $t : deactivated (count=$cnt); feeder stopped"
+            }
+            continue
+        }
+
+        $isLive   = [bool]$online["tatami/$key"]
+        $desired  = if ($isLive) { 'live' } else { 'fallback' }
 
         if ((-not $alive) -or ($cur.mode -ne $desired)) {
             if ($alive) { Stop-Process -Id $cur.pid -Force -ErrorAction SilentlyContinue }

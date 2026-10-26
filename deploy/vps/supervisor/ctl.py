@@ -16,6 +16,10 @@
 #   POST /labels                -> body {"label":{"<screen>":"<text>"}}; merges the
 #                                 caption into the labels file. The caption is a
 #                                 DISPLAY name only - routing never depends on it.
+#   GET  /screens               -> {"count":N} - how many screens the rig runs
+#   POST /screens               -> body {"count":N} (1..8). The supervisor feeds
+#                                 only screens 1..N; the rest are dormant, so the
+#                                 panel can start with 2 cards and grow by '+'.
 #
 # NUMBERED-KEY model: screen letters a..h are screens 1..8 everywhere the
 # operator looks (errors, panel cards). Key N feeds screen N; the letter stays
@@ -37,6 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # (double-click, panel + manual) can never interleave into a corrupted file.
 OUTPUTS_LOCK = threading.Lock()
 LABELS_LOCK = threading.Lock()
+SCREENS_LOCK = threading.Lock()
 
 INTENT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/control"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8090
@@ -44,6 +49,10 @@ TATAMIS = [t for t in (os.environ.get("TATAMIS") or "a b c d e f g h").split()]
 OUTPUTS_PATH = os.environ.get("OUTPUTS_PATH", "/outputs/outputs.local.conf")
 # Operator captions ("Татами A · Кубок района") shown on each screen card.
 LABELS_PATH = os.environ.get("LABELS_FILE", os.path.join(INTENT_DIR, "labels.json"))
+# Active screen count lives NEXT TO the outputs file (same persisted volume),
+# so no new env/compose entry is needed. Missing file -> DEFAULT_SCREEN_COUNT.
+SCREENS_PATH = os.path.join(os.path.dirname(OUTPUTS_PATH) or ".", "screens.conf")
+DEFAULT_SCREEN_COUNT = 2
 
 # <letter> <dest>, where a leading '#' marks a disabled entry.
 LINE_RE = re.compile(r"^\s*#?\s*([a-z])\s+(\S.*)$")
@@ -245,6 +254,39 @@ def write_labels(patch):
     return read_labels(), []
 
 
+def read_count():
+    """Active screen count (1..len(TATAMIS)); missing/garbage file -> default."""
+    try:
+        with open(SCREENS_PATH, encoding="utf-8-sig") as f:
+            for raw in f:
+                s = raw.strip()
+                if s.isdigit():
+                    return max(1, min(len(TATAMIS), int(s)))
+    except OSError:
+        pass
+    return max(1, min(len(TATAMIS), DEFAULT_SCREEN_COUNT))
+
+
+def write_count(n):
+    """Validate + persist the screen count atomically. Returns (count, errors)."""
+    if not isinstance(n, int) or not (1 <= n <= len(TATAMIS)):
+        return read_count(), [f"количество экранов должно быть числом 1..{len(TATAMIS)}"]
+    tmp = f"{SCREENS_PATH}.tmp.{os.getpid()}.{time.time_ns()}"
+    with SCREENS_LOCK:
+        os.makedirs(os.path.dirname(SCREENS_PATH) or ".", exist_ok=True)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(f"{n}\n")
+            os.replace(tmp, SCREENS_PATH)
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+    return read_count(), []
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, obj):
         b = json.dumps(obj).encode()
@@ -274,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"items": read_outputs()})
         elif p == ["labels"]:
             self._send(200, read_labels())
+        elif p == ["screens"]:
+            self._send(200, {"count": read_count()})
         else:
             self._send(404, {"error": "not found"})
 
@@ -302,8 +346,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "invalid labels", "errors": errors})
             else:
                 self._send(200, saved)
+        elif p == ["screens"]:
+            body = self._read_body()
+            saved, errors = write_count(body.get("count"))
+            if errors:
+                self._send(400, {"error": "invalid screens", "errors": errors})
+            else:
+                self._send(200, {"count": saved})
         else:
-            self._send(400, {"error": "use /end/<screen>, /resume/<screen>, /outputs or /labels"})
+            self._send(400, {"error": "use /end/<screen>, /resume/<screen>, /outputs, /labels or /screens"})
 
     def log_message(self, *args):
         pass

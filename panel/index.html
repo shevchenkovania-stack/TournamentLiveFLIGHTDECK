@@ -69,14 +69,24 @@
     .save:hover { background:#2b7bff; }
     .msg { margin-left:8px; font-size:11px; color:var(--muted); }
     .empty { color:var(--muted); font-size:12px; padding:4px 0; }
+    /* Collapsible push header + screen add/remove footer */
+    .bt.tog { cursor:pointer; user-select:none; }
+    .bt.tog:hover { color:var(--txt); }
+    .foot { display:flex; gap:10px; padding:2px 22px 26px; flex-wrap:wrap; }
+    .foot .btn.addscr { color:#4ade80; border-color:#1f5c2c; }
+    .foot .btn.rmscr { color:#f87171; border-color:#6b2020; }
   </style>
 </head>
 <body>
   <header>
     <h1>TournamentLive <span style="color:var(--muted);font-weight:400">·</span> FLIGHT DECK</h1>
-    <span class="sub">Экран N = ключ N: поток, залитый по ключу N, появляется ровно на экране N. Подпись «татами/турнир» — свободный текст. Обновление каждые 2 сек.</span>
+    <span class="sub">Экран N = ключ N: поток, залитый по ключу N, появляется ровно на экране N. Экранов столько, сколько нужно — «➕» добавляет, «−» убирает последний. Обновление каждые 2 сек.</span>
   </header>
   <div class="grid" id="grid"></div>
+  <div class="foot">
+    <button class="btn addscr" id="addScr">➕ Добавить экран</button>
+    <button class="btn rmscr" id="rmScr">− Убрать экран</button>
+  </div>
 
   <script>
     // Internal letters a..h == ЭКРАН 1..8. The operator only ever sees numbers.
@@ -95,6 +105,9 @@
     // ROWS = all platform entries (one letter may have several platforms).
     let ROWS = [];
     let LABELS = {};
+    // Active screen count (server-side truth in outputs/screens.conf; the
+    // supervisor feeds only screens 1..COUNT). Fetched on every tick.
+    let COUNT = 2;
 
     // ---- Build the eight screen cards ----------------------------------------
     LETTERS.forEach((t) => {
@@ -117,10 +130,12 @@
           <div class="ph" id="ph-${t}">Предпросмотр выключен для экономии CPU</div>
         </div>
         <div class="pushbox">
-          <div class="bt">📲 Куда лить на этот экран (настройки камеры/приложения):</div>
-          <div class="kv"><span class="k">URL</span><code>${RTMP_PUSH_URL}</code><button class="cp" id="cpurl-${t}">копировать</button></div>
-          <div class="kv"><span class="k">Ключ</span><code class="key">${n}</code><button class="cp" id="cpkey-${t}">копировать</button></div>
-          <div class="warn">URL — со слэшем «/» на конце; в поле «ключ» — только цифра ${n}.</div>
+          <div class="bt tog" id="tog-${t}">▾ 📲 Куда лить на этот экран · ключ ${n}</div>
+          <div id="pb-${t}">
+            <div class="kv"><span class="k">URL</span><code>${RTMP_PUSH_URL}</code><button class="cp" id="cpurl-${t}">копировать</button></div>
+            <div class="kv"><span class="k">Ключ</span><code class="key">${n}</code><button class="cp" id="cpkey-${t}">копировать</button></div>
+            <div class="warn">URL — со слэшем «/» на конце; в поле «ключ» — только цифра ${n}.</div>
+          </div>
         </div>
         <div class="platbox">
           <div class="bt">🔌 Куда транслируем с этого экрана (площадки):</div>
@@ -146,9 +161,53 @@
       document.getElementById('lab-' + t).onchange = () => saveLabel(t);
       document.getElementById('cpurl-' + t).onclick = () => copyText(RTMP_PUSH_URL, document.getElementById('cpurl-' + t));
       document.getElementById('cpkey-' + t).onclick = () => copyText(String(num(t)), document.getElementById('cpkey-' + t));
+      document.getElementById('tog-' + t).onclick = () => setPushOpen(t, isPushOpen(t) ? '0' : '1');
+      setPushOpen(t, localStorage.getItem('tl.push.' + t) || '1');  // open by default
       document.getElementById('add-' + t).onclick = () => { ROWS.push({ tatami: t, plat: 'vk', val: '', enabled: false }); renderPlats(); };
       document.getElementById('save-' + t).onclick = () => saveOutputs(t);
     });
+
+    // ---- Collapsible "куда лить" block (state remembered per screen) --------
+    function isPushOpen(t) {
+      return document.getElementById('pb-' + t).style.display !== 'none';
+    }
+    function setPushOpen(t, v) {           // v: '1' open / '0' closed
+      localStorage.setItem('tl.push.' + t, v);
+      document.getElementById('pb-' + t).style.display = v === '1' ? '' : 'none';
+      document.getElementById('tog-' + t).textContent =
+        (v === '1' ? '▾ ' : '▸ ') + '📲 Куда лить на этот экран · ключ ' + num(t);
+    }
+
+    // ---- Active screens: cards 1..COUNT visible; '+', '−' change the count --
+    function renderScreens() {
+      LETTERS.forEach((t, i) => {
+        document.getElementById('card-' + t).style.display = i < COUNT ? '' : 'none';
+      });
+      document.getElementById('addScr').style.display = COUNT < LETTERS.length ? '' : 'none';
+      const rm = document.getElementById('rmScr');
+      rm.style.display = COUNT > 1 ? '' : 'none';
+      rm.textContent = '− Убрать ЭКРАН ' + COUNT;
+    }
+    async function setCount(n) {
+      try {
+        const r = await fetch('/ctl/screens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: n }) });
+        const d = await r.json();
+        if (!r.ok) { alert('Экраны: ' + ((d.errors || [d.error || 'ошибка']).join(' · '))); return; }
+        COUNT = d.count;
+        renderScreens();
+      } catch (e) { /* server down: next tick shows API DOWN */ }
+    }
+    document.getElementById('addScr').onclick = () => {
+      if (COUNT >= LETTERS.length) return;
+      const t = LETTERS[COUNT];                 // the new screen: expand its
+      setPushOpen(t, '1');                      // push block so the key is seen
+      setCount(COUNT + 1);
+    };
+    document.getElementById('rmScr').onclick = () => {
+      if (COUNT <= 1) return;
+      if (confirm('Убрать ЭКРАН ' + COUNT + '? Настройки его площадок сохранены — они вернутся, если добавить экран обратно.')) setCount(COUNT - 1);
+    };
+    renderScreens();
 
     function setBadge(el, cls, txt) { el.className = 'badge ' + cls; el.textContent = txt; }
 
@@ -180,6 +239,11 @@
 
       let ctlstate = {};
       try { ctlstate = await (await fetch('/ctl/state', { cache: 'no-store' })).json(); } catch (e) {}
+      // Screen count may change under our feet (second operator, '+/−').
+      try {
+        const sc = await (await fetch('/ctl/screens', { cache: 'no-store' })).json();
+        if (sc.count && sc.count !== COUNT) { COUNT = sc.count; renderScreens(); }
+      } catch (e) {}
       // Captions come from the server (another operator may have changed them);
       // never stomp on an input the operator is typing in right now.
       try {

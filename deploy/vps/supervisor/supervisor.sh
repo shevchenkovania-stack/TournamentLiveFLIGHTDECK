@@ -29,6 +29,11 @@ TATAMIS="${TATAMIS:-a b c d e f g h}"
 FDIR="${FALLBACK_DIR:-/fallback}"
 INT="${INTERVAL_SEC:-2}"
 INTENT_DIR="${INTENT_DIR:-/control}"
+# Active screen count: screens.conf NEXT TO the outputs file (panel writes it
+# via ctl.py POST /screens). The rig starts small (default 2) and grows by the
+# panel '+' button; screens beyond the count stay fully dormant.
+SCR_FILE="$(dirname "${OUTPUTS_PATH:-/outputs/x.conf}")/screens.conf"
+DEFAULT_COUNT=2
 CTL_PORT="${CTL_PORT:-8090}"
 RTMP="rtmp://${HOST}:${PORT}"
 # Anonymous API when no admin password is set (local MVP grants 'any' the api
@@ -53,6 +58,19 @@ intent_of() { if [ -f "$INTENT_DIR/$1" ]; then cat "$INTENT_DIR/$1"; else echo h
 
 # Screen letter -> its number (a=1 .. h=8). The ingest key operators use.
 no_of() { printf '%s' "$1" | tr 'abcdefgh' '12345678'; }
+
+# Active screen count 1..8; garbage/missing file -> sane default.
+screen_count() {
+  max=$(printf '%s\n' $TATAMIS | wc -l)
+  c="$DEFAULT_COUNT"
+  if [ -f "$SCR_FILE" ]; then
+    v=$(grep -m1 -oE '[0-9]+' "$SCR_FILE" 2>/dev/null)
+    [ -n "$v" ] && c="$v"
+  fi
+  [ "$c" -ge 1 ] || c=1
+  [ "$c" -le "$max" ] || c="$max"
+  printf '%s' "$c"
+}
 
 # Returns 0 if the given MediaMTX path is online.
 is_online() {
@@ -93,11 +111,25 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-log "supervisor up: screens=[$TATAMIS] keys=1..8 api=${API##*@} interval=${INT}s"
+log "supervisor up: screens=[$TATAMIS] keys=1..8 active=$(screen_count) api=${API##*@} interval=${INT}s"
 
 while :; do
+  CNT=$(screen_count)
+  i=0
   for s in $TATAMIS; do
+    i=$((i+1))
     n=$(no_of "$s")
+
+    # Screen past the active count (operator removed it with '-'): make sure
+    # its feeder is stopped, then skip. Re-adding it resumes automatically.
+    if [ "$i" -gt "$CNT" ]; then
+      if alive "$s"; then
+        kill "$(cat "$(pid_file "$s")")" 2>/dev/null
+        echo "" > "$(mode_file "$s")"
+        log "screen/$s (key $n): deactivated (count=$CNT)"
+      fi
+      continue
+    fi
 
     if [ "$(intent_of "$s")" = ended ]; then
       # Graceful end: stop feeding broadcast/<s> so the relay closes its

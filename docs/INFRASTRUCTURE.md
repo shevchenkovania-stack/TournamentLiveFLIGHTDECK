@@ -55,7 +55,7 @@
 | Контейнер | Образ | Роль |
 |---|---|---|
 | `tl-mediamtx` | `bluenviron/mediamtx:latest` | RTMP-приём `:1935`, HLS-превью `:8888`, HTTP API `:9997` (внутр. сеть), 16 объявленных путей |
-| `tl-supervisor` | `tl-supervisor:local` | **Главный «мозг» непрерывности**: цикл каждые 2 с — для каждого татами держит ровно один FFmpeg-фидер в `broadcast/<x>` (live-копия входа или зацикленная стоп-карта). Плюс контрольный сервер `:8090` (`/state`, `/outputs`, `/end/<x>`, `/resume/<x>`) |
+| `tl-supervisor` | `tl-supervisor:local` | **Главный «мозг» непрерывности**: цикл каждые 2 с — держит ровно один FFmpeg-фидер в `broadcast/<x>` для каждого **активного** экрана (live-копия входа или зацикленная стоп-карта; неактивные экраны спят). Плюс контрольный сервер `:8090` (`/state`, `/outputs`, `/labels`, `/screens`, `/end/<x>`, `/resume/<x>`) |
 | `tl-relayer` | `tl-relayer:local` | Ретрансляция `broadcast/<x>` → площадки (YouTube/VK/...). Перечитывает `outputs.local.conf` каждые 3 с, hot-reload ключей без рестарта; один ffmpeg на пару «буква+адрес» (несколько площадок на одно татами — поддерживается) |
 | `tl-caddy` | `caddy:2-alpine` | Фронт панели `:80`: BasicAuth, статика кокпита, прокси `/v3` → API mediamtx, `/ctl` → supervisor |
 
@@ -332,6 +332,7 @@ http://172.22.22.17:8888/broadcast/a/   превью выхода татами A
 Логи:          docker logs --tail 50 tl-supervisor | tl-relayer | tl-mediamtx | tl-caddy
 Ключи площадок: карточка экрана → «Куда транслируем» (файл deploy/vps/outputs/outputs.local.conf)
 Подпись татами/турнира: та же карточка (файл deploy/vps/outputs/labels.json)
+Количество экранов: кнопки «➕/−» внизу панели (файл deploy/vps/outputs/screens.conf, по умолчанию 2)
 Завершить/Возобновить: кнопки на карточке экрана (intent'ы: GET http://172.22.22.17:8070/ctl/state)
 Стоп-карты:    перегенерировать локально scripts/gen-fallback.ps1 → скопировать 8 mp4
 ```
