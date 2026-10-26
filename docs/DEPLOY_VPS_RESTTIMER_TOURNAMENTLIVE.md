@@ -9,7 +9,7 @@
 Стек (`mediamtx + supervisor + relayer + caddy`) развёрнут и **проверен живым прогодом**
 в директории `/root/Restrimer_TournamentLive` на сервере `172.22.22.17` (Debian 12).
 Выходы `broadcast/a..h` непрерывны (замена live↔заставка без ухода в ноль), панель
-доступна по `http://172.22.22.17`, автозапуск systemd включён. Локально ничего держать
+доступна по `http://172.22.22.17:8070`, автозапуск systemd включён. Локально ничего держать
 не нужно.
 
 ---
@@ -32,10 +32,11 @@
 ## 2. Что где лежит на сервере
 ```
 /root/Restrimer_TournamentLive/
-├── relay/                 # relayer.sh + Dockerfile (билд tl-relayer:local)
+├── relay/                 # relayer.sh + Dockerfile (билд tl-relayer:loca
 ├── panel/index.html       # кокпит (монтируется в caddy как /srv/panel)
 └── deploy/vps/
-    ├── docker-compose.yml # IP/LAN-режим: опубликованы 1935, 8888, 80/443
+    ├── docker-compose.yml # IP/LAN-режим: опубликованы 1935, 8888, 8070->80, 443
+    │                      # (хостовый :80 занят другой службой → панель на :8070)
     ├── mediamtx.yml       # 16 путей; record: no; auth только 'any' (см. §4)
     ├── Caddyfile          # HTTP на IP, BasicAuth, /v3 через handle (см. §4)
     ├── panel/config.js    # playerOrigin = http://172.22.22.17:8888
@@ -89,7 +90,8 @@ docker exec tl-supervisor curl -s http://mediamtx:9997/v3/paths/list | grep -o '
 ---
 
 ## 5. Панель и доступы
-- URL: `http://172.22.22.17` (HTTP, LAN; TLS не ставили — домена нет, самоб-signed не нужен).
+- URL: `http://172.22.22.17:8070` (HTTP, LAN; TLS не ставили — домена нет, самоб-signed не нужен).
+  ⚠️ Не `:80` — порт 80 на сервере занят, в compose маппинг `8070->80` (проверено 26.10.2026).
 - BasicAuth: пользователь `operator`, пароль сгенерирован и выдан в чате 22.10.2026
   (в git не попадает). Как узнать/сбросить пароль панели:
   ```bash
