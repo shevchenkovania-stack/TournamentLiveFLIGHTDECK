@@ -1,5 +1,6 @@
 # Runtime artifacts - never commit
 data/recordings/
+/recordings/
 logs/
 *.log
 *.paused
