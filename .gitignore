@@ -8,6 +8,11 @@ probe*.json
 apiprobe.json
 control/
 
+# TLS certs/keys generated at runtime (Caddy auto.crt/auto.key etc.) - never commit
+*.crt
+*.key
+!deploy/**/*.key
+
 # Generated fallback clips (regenerate via scripts/gen-fallback.ps1)
 fallback/*.mp4
 
