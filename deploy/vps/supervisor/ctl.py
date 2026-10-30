@@ -4,6 +4,16 @@
 # the platform output destinations (VK/YouTube keys) as plain files.
 #
 #   GET  /state                 -> {"a":"hold", "b":"ended", ...}
+#   GET  /status                -> {"items":{"a":{"key":"online","since":12,
+#                                 "feed":"live:1","feedSince":12,"drops":3}, ...}}
+#                                 What the supervisor itself observed per screen:
+#                                 is the ingest key publishing, for how long, and
+#                                 what is feeding the output (live or заставка).
+#                                 Ages are computed HERE so the browser never has
+#                                 to compare two clocks. This is what lets the
+#                                 cockpit show «ОБРЫВ» for a 3-second reconnect
+#                                 instead of shouting «СВОБОДЕН» over a picture
+#                                 that is still on air.
 #   POST /end/<tatami>          -> graceful end: stop feeding broadcast/<x> (platform ends)
 #   POST /resume/<tatami>       -> back to hold: live if input up, else fallback
 #   GET  /outputs               -> {"items":[{"tatami","dest","enabled"}, ...]}
@@ -216,6 +226,48 @@ def write_outputs(items):
     return read_outputs(), []
 
 
+def read_feed(t):
+    """Parse the supervisor's per-screen state file (key=value lines).
+
+    Missing file (supervisor not up yet, or this screen is dormant) -> {}.
+    """
+    d = {}
+    try:
+        with open(os.path.join(INTENT_DIR, t + ".state"), encoding="utf-8") as f:
+            for raw in f:
+                k, _, v = raw.strip().partition("=")
+                if k:
+                    d[k] = v
+    except OSError:
+        return {}
+    return d
+
+
+def read_status():
+    """Supervisor observations per screen, with ages in seconds (server clock)."""
+    now = int(time.time())
+    items = {}
+    for t in TATAMIS:
+        d = read_feed(t)
+        if not d:
+            continue
+
+        def age(key):
+            try:
+                return max(0, now - int(d.get(key) or 0))
+            except ValueError:
+                return None
+
+        items[t] = {
+            "key": d.get("key", ""),
+            "since": age("edge"),
+            "feed": d.get("feed", ""),
+            "feedSince": age("feedEdge"),
+            "drops": int(d.get("drops") or 0),
+        }
+    return items
+
+
 def read_labels():
     """Operator captions per screen; missing file -> empty map."""
     try:
@@ -312,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
         p = self._parts()
         if p == ["state"]:
             self._send(200, {t: intent_of(t) for t in TATAMIS})
+        elif p == ["status"]:
+            self._send(200, {"items": read_status()})
         elif p == ["outputs"]:
             self._send(200, {"items": read_outputs()})
         elif p == ["labels"]:

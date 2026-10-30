@@ -59,6 +59,46 @@ intent_of() { if [ -f "$INTENT_DIR/$1" ]; then cat "$INTENT_DIR/$1"; else echo h
 # Screen letter -> its number (a=1 .. h=8). The ingest key operators use.
 no_of() { printf '%s' "$1" | tr 'abcdefgh' '12345678'; }
 
+# ---- Panel status publishing -------------------------------------------------
+# Publish/overwrite <INTENT_DIR>/<letter>.state with what the panel needs and
+# cannot learn from a single MediaMTX sample:
+#   key=online|offline   edge=<epoch this input state started>
+#   feed=live:N|fallback:<file>|ended|off   feedEdge=<epoch>
+#   drops=<input losses seen since startup>
+# ctl.py serves it at GET /status and turns the epochs into "seconds in this
+# state", so the cockpit can tell «ключ моргнул 3 секунды назад» (still on air,
+# platforms are playing their buffer) from «этого ключа нет вообще» - and keeps
+# telling it correctly after a page reload, when the browser has no history.
+# Written only when the content actually changes: a stable screen is silent.
+pub_state() { # $1=letter $2=key_online(1/0/'') $3=feed('' = unchanged)
+  s="$1"; on="$2"; feed="$3"; now="$(date +%s)"
+  m="$STATE_DIR/$s.st"
+  k=""; edge=""; f=""; feed_edge=""; drops=0
+  if [ -f "$m" ]; then
+    k=$(sed -n 's/^k=//p' "$m"); edge=$(sed -n 's/^e=//p' "$m")
+    f=$(sed -n 's/^f=//p' "$m"); feed_edge=$(sed -n 's/^fe=//p' "$m")
+    drops=$(sed -n 's/^d=//p' "$m")
+  fi
+  [ -n "$drops" ] || drops=0
+  if [ -z "$k" ]; then k="${on:-0}"; edge="$now"; fi
+  if [ -z "$f" ]; then f="$feed"; feed_edge="$now"; fi
+  if [ -n "$on" ] && [ "$on" != "$k" ]; then
+    [ "$k" = 1 ] && drops=$((drops + 1))   # online -> offline is one loss
+    k="$on"; edge="$now"
+  fi
+  if [ -n "$feed" ] && [ "$feed" != "$f" ]; then f="$feed"; feed_edge="$now"; fi
+  printf 'k=%s\ne=%s\nf=%s\nfe=%s\nd=%s\n' "$k" "$edge" "$f" "$feed_edge" "$drops" > "$m"
+  tmp="$STATE_DIR/$s.state"
+  {
+    if [ "$k" = 1 ]; then printf 'key=online\n'; else printf 'key=offline\n'; fi
+    printf 'edge=%s\n' "$edge"
+    printf 'feed=%s\n' "$f"
+    printf 'feedEdge=%s\n' "$feed_edge"
+    printf 'drops=%s\n' "$drops"
+  } > "$tmp"
+  cmp -s "$tmp" "$INTENT_DIR/$s.state" || cat "$tmp" > "$INTENT_DIR/$s.state"
+}
+
 # Active screen count 1..8; garbage/missing file -> sane default.
 screen_count() {
   max=$(printf '%s\n' $TATAMIS | wc -l)
@@ -128,8 +168,13 @@ while :; do
         echo "" > "$(mode_file "$s")"
         log "screen/$s (key $n): deactivated (count=$CNT)"
       fi
+      pub_state "$s" "" "off"
       continue
     fi
+
+    # Input presence, probed once per screen per tick and published whether or
+    # not we go on to feed anything (the panel's input badge reads it).
+    if is_online "tatami/$n"; then on=1; else on=0; fi
 
     if [ "$(intent_of "$s")" = ended ]; then
       # Graceful end: stop feeding broadcast/<s> so the relay closes its
@@ -139,10 +184,11 @@ while :; do
         echo "" > "$(mode_file "$s")"
         log "screen/$s (key $n): operator END -> broadcast/$s taken offline (platform ends)"
       fi
+      pub_state "$s" "$on" "ended"
       continue
     fi
 
-    if is_online "tatami/$n"; then
+    if [ "$on" = 1 ]; then
       want="live:$n"
     else
       fb="fallback_$s.mp4"
@@ -154,7 +200,8 @@ while :; do
     [ -f "$(mode_file "$s")" ] && cur="$(cat "$(mode_file "$s")")"
 
     if alive "$s" && [ "$cur" = "$want" ]; then
-      continue  # feeder healthy and on the right source -> nothing to do
+      pub_state "$s" "$on" "$cur"   # feeder healthy and on the right source
+      continue
     fi
 
     if alive "$s"; then
@@ -164,6 +211,7 @@ while :; do
 
     start_feeder "$s" "$want"
     echo "$want" > "$(mode_file "$s")"
+    pub_state "$s" "$on" "$want"
     log "screen/$s (key $n): ${cur:-none} -> ${want} (feeding broadcast/$s, pid=$(cat "$(pid_file "$s")"))"
   done
   sleep "$INT"

@@ -17,7 +17,8 @@ panel.example.com {
 	}
 
 	# MediaMTX control API on the same origin (the cockpit fetches /v3/paths/list).
-	handle_path /v3/* {
+	# Use handle (NOT handle_path): Mediamtx expects the full /v3/ prefix.
+	handle /v3/* {
 		reverse_proxy mediamtx:9997
 	}
 

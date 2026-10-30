@@ -28,6 +28,8 @@
     .badge { font-size:11px; font-weight:700; letter-spacing:.4px; padding:4px 9px; border-radius:999px; text-transform:uppercase; }
     .live { background:#12351b; color:#4ade80; border:1px solid #1f5c2c; }
     .fallback { background:#3a2a10; color:#fbbf24; border:1px solid #6b4a15; }
+    /* Input went down a few seconds ago (phone reconnecting) - not a free key. */
+    .flap { background:#3a2a10; color:#fbbf24; border:1px solid #6b4a15; }
     .offline { background:#3a1414; color:#f87171; border:1px solid #6b2020; }
     .preview { position:relative; aspect-ratio:16/9; background:#000; }
     .preview iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
@@ -80,7 +82,7 @@
 <body>
   <header>
     <h1>TournamentLive <span style="color:var(--muted);font-weight:400">·</span> FLIGHT DECK</h1>
-    <span class="sub">Экран N = ключ N. Клик по «ЭКРАН N» открывает/скрывает все настройки карточки. Экранов столько, сколько нужно — «➕» добавляет, «−» убирает последний. Обновление каждые 2 сек.</span>
+    <span class="sub">Экран N = ключ N. Клик по «ЭКРАН N» открывает/скрывает все настройки карточки. Экранов столько, сколько нужно — «➕» добавляет, «−» убирает последний. Обновление каждые 2 сек.<br>Вход: <b>ИДЕТ</b> — камера лить может; <b>ОБРЫВ</b> — связь телефона моргнула (&lt;12 сек), площадки ещё показывают картинку из буфера; <b>СВОБОДЕН</b> — входа нет дольше 12 сек.</span>
   </header>
   <div class="grid" id="grid"></div>
   <div class="foot">
@@ -108,6 +110,22 @@
     // Active screen count (server-side truth in outputs/screens.conf; the
     // supervisor feeds only screens 1..COUNT). Fetched on every tick.
     let COUNT = 2;
+
+    // How long the ingest must be continuously gone before we dare to call the
+    // key СВОБОДЕН (see tick()). Shorter outages are link hiccups, not an empty
+    // screen - and the platforms keep playing their buffer through them.
+    const FREE_AFTER = 12;
+    // Per-screen client-side input history (survives between ticks only).
+    const IN = {};                          // letter -> { downSince }
+
+    // 42 -> '42 с', 95 -> '1 мин 35 с', 3800 -> '1 ч 03 м'.
+    function dur(s) {
+      s = Math.max(0, Math.round(s));
+      if (s < 60) return s + ' с';
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + ' мин ' + (s % 60) + ' с';
+      return Math.floor(m / 60) + ' ч ' + (m % 60) + ' м';
+    }
 
     // ---- Build the eight screen cards ----------------------------------------
     LETTERS.forEach((t) => {
@@ -229,6 +247,7 @@
       try {
         const r = await fetch('/v3/paths/list', { cache: 'no-store' });
         data = (await r.json()).items;
+        if (!Array.isArray(data)) throw new Error('no items');
       } catch (e) {
         LETTERS.forEach((t) => setBadge(document.getElementById('in-' + t), 'offline', 'API DOWN'));
         return;
@@ -238,6 +257,17 @@
 
       let ctlstate = {};
       try { ctlstate = await (await fetch('/ctl/state', { cache: 'no-store' })).json(); } catch (e) {}
+      // The supervisor's own verdict per screen: what is feeding the output and
+      // for how long the input has been up/down. Authoritative for the input
+      // badge because it is measured on the server continuously - a page opened
+      // while the link is blipping has no history of its own and cannot tell a
+      // 2-second reconnect from a key nobody ever used. An older supervisor
+      // answers 404 here; the panel then falls back to its own tick history.
+      let feed = {};
+      try {
+        const f = await (await fetch('/ctl/status', { cache: 'no-store' })).json();
+        if (f && f.items && typeof f.items === 'object') feed = f.items;
+      } catch (e) {}
       // Screen count may change under our feet (second operator, '+/−').
       try {
         const sc = await (await fetch('/ctl/screens', { cache: 'no-store' })).json();
@@ -261,16 +291,45 @@
         const inOnline = inp && inp.online;
         const outOnline = out && out.online;
         const ended = ctlstate[t] === 'ended';
+        const f = feed[t] || {};
 
-        // Input badge: key N is the screen's own key - live or free.
+        // ---- Input badge, with hysteresis -------------------------------------
+        // One 2-second poll without a publisher is a RECONNECT, not an empty
+        // screen: the preview and the platforms still carry the picture (HLS and
+        // YouTube both buffer several seconds), so a red 'СВОБОДЕН' right over a
+        // moving image is exactly the thing the operator stops believing. Three
+        // states, keyed on how long the ingest has been continuously down:
+        //   ИДЕТ (green)     - publisher up in this sample
+        //   ОБРЫВ (amber)    - down for < FREE_AFTER seconds
+        //   СВОБОДЕН (red)   - down for FREE_AFTER seconds and longer
+        // Down-time is taken from the supervisor (server-measured, survives a
+        // page reload) when available, else from our own tick history.
+        const st = IN[t] || (IN[t] = { upAt: 0, downAt: 0 });
+        if (inOnline) { st.upAt = Date.now(); st.downAt = 0; }
+        else if (!st.downAt) st.downAt = Date.now();
+        // Gap we watched with our own eyes (only meaningful if this page has
+        // actually seen the key up) and the gap the supervisor measured.
+        const watchedDown = (st.upAt && st.downAt) ? Math.round((st.downAt - st.upAt) / 1000) : 0;
+        const srvDown = f.key === 'offline' ? (f.since || 0) : 0;
+        const downFor = Math.max(watchedDown, srvDown);
+        // An ОБРЫВ is claimed only when there is PROOF the key was streaming
+        // seconds ago: the server says so, or this page watched it go down. A
+        // key nobody ever saw up stays honestly СВОБОДЕН.
+        const justDropped = downFor < FREE_AFTER && (srvDown > 0 || !!(st.upAt && st.downAt));
+
         const inB = document.getElementById('in-' + t);
         if (inOnline) setBadge(inB, 'live', 'ИДЕТ · ключ ' + n);
+        else if (justDropped) setBadge(inB, 'flap', 'ОБРЫВ · ключ ' + n);
         else setBadge(inB, 'offline', 'СВОБОДЕН · ключ ' + n);
 
-        // Output badge (what platforms actually receive)
+        // Output badge (what platforms actually receive). The supervisor's
+        // feed state is the ground truth for 'live picture' vs 'заставка'; the
+        // broadcast path's own online flag is only a fallback reading.
         const outB = document.getElementById('out-' + t);
         const modeEl = document.getElementById('mode-' + t);
         if (ended) { setBadge(outB, 'offline', 'ЗАВЕРШЕНО'); modeEl.textContent = 'ЗАВЕРШЕНО (штатно, оператор)'; }
+        else if (f.feed && f.feed.indexOf('live:') === 0) { setBadge(outB, 'live', 'Выход LIVE'); modeEl.textContent = 'LIVE (живое видео, ключ ' + f.feed.slice(5) + ')'; }
+        else if (f.feed && f.feed.indexOf('fallback:') === 0) { setBadge(outB, 'fallback', 'Выход FALLBACK'); modeEl.textContent = 'FALLBACK (заставка)'; }
         else if (outOnline && inOnline) { setBadge(outB, 'live', 'Выход LIVE'); modeEl.textContent = 'LIVE (живое видео, ключ ' + n + ')'; }
         else if (outOnline && !inOnline) { setBadge(outB, 'fallback', 'Выход FALLBACK'); modeEl.textContent = 'FALLBACK (заставка)'; }
         else { setBadge(outB, 'offline', 'Выход OFF'); modeEl.textContent = 'OFFLINE'; }
@@ -290,16 +349,26 @@
         document.getElementById('end-' + t).setAttribute('aria-disabled', ended ? 'true' : 'false');
         document.getElementById('res-' + t).setAttribute('aria-disabled', ended ? 'false' : 'true');
 
-        // Resolution / bitrate meta from the live input when present
+        // Resolution / bitrate meta from the live input when present, plus the
+        // input stability line - the operator sees WHY the badge is what it is.
         const meta = document.getElementById('meta-' + t);
+        let line = '';
         if (inOnline && inp.tracks2) {
           const v = inp.tracks2.find((x) => x.codec === 'H264' || x.codec === 'VP9' || x.codec === 'AV1');
           const res = v && v.codecProps ? v.codecProps.width + 'x' + v.codecProps.height : '—';
           const mbps = (inp.bytesReceived / 1e6).toFixed(1); // cumulative MB as rough indicator
-          meta.textContent = `разрешение: ${res} · принято: ${mbps} МБ`;
+          line = `разрешение: ${res} · принято: ${mbps} МБ`;
         } else {
-          meta.textContent = 'разрешение: — · принято: —';
+          line = 'разрешение: — · принято: —';
         }
+        if (f.drops) line += ` · обрывов входа: ${f.drops}`;
+        if (inOnline) {
+          if (f.key === 'online' && f.since) line += ` · держится: ${dur(f.since)}`;
+        } else if (downFor) {
+          line += ` · входа нет: ${dur(downFor)}`;
+          if (justDropped) line += ' (картинка на площадках ещё из буфера)';
+        }
+        meta.textContent = line;
 
         // Preview / open links point at the MediaMTX player for the OUTPUT path.
         // Locally this is :8888 on the same host. On a VPS set window.TL.playerOrigin
