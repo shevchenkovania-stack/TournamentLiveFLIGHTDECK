@@ -43,6 +43,8 @@ services:
       MTX_ADMIN_PASSWORD: "${MTX_ADMIN_PASSWORD:-admin_password_CHANGE_ME}"
       TATAMIS: "a b c d e f g h"
       FALLBACK_DIR: "/fallback"
+      # Continuous input outage before a screen auto-ENDs (sec). 0 = never.
+      AUTOEND_SEC: "${AUTOEND_SEC:-3600}"
       OUTPUTS_PATH: "/outputs/outputs.local.conf"
       # Operator captions ("татами/турнир") persist next to the intent files.
       LABELS_FILE: "/outputs/labels.json"

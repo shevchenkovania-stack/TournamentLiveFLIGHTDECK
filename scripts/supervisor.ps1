@@ -2,6 +2,10 @@
 # For each screen (internal letter a..h = ЭКРАН 1..8) it keeps broadcast/<x> alive:
 #   - if key N is publishing live to tatami/<N>  -> feed broadcast/<x> from the live stream
 #   - if tatami/<N> is offline                   -> feed broadcast/<x> by looping fallback/<x>.mp4
+#   - if tatami/<N> stays offline for AutoEndSec (default 1h) -> auto-end: stop the
+#     feeder so broadcast/<x> goes offline (platforms show 'broadcast ended').
+#     When the live input comes back the screen resumes by itself (VPS supervisor
+#     behaves the same via its auto-END).
 # Platforms (VK/YouTube) and the dashboard read broadcast/<x>, which stays (near) continuously online,
 # so the outbound publication is NOT recreated on input loss (only a sub-second feeder swap).
 #
@@ -13,7 +17,10 @@
 param(
     [string[]]$Tatamis   = @('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'),
     [int]$IntervalSec    = 2,
-    [string]$ServerHost  = 'localhost'
+    [string]$ServerHost  = 'localhost',
+    # Continuous input outage (seconds) after which the feeder is stopped.
+    # 0 disables auto-end (fallback loops forever, like before).
+    [int]$AutoEndSec     = 3600
 )
 
 $RtmpBase = "rtmp://${ServerHost}:1935"
@@ -64,7 +71,7 @@ function Get-ScreenCount {
 }
 
 $state = @{}
-foreach ($t in $Tatamis) { $state[$t] = @{ mode = $null; pid = $null } }
+foreach ($t in $Tatamis) { $state[$t] = @{ mode = $null; pid = $null; offSince = $null } }
 
 Log "Supervisor started for screens: $($Tatamis -join ',') (keys 1..$($Tatamis.Count))"
 
@@ -92,11 +99,42 @@ while ($true) {
                 $cur.mode = $null; $cur.pid = $null
                 Log "key $key -> screen $t : deactivated (count=$cnt); feeder stopped"
             }
+            $cur.offSince = $null   # dormant screen: outage clock must not age
             continue
         }
 
-        $isLive   = [bool]$online["tatami/$key"]
-        $desired  = if ($isLive) { 'live' } else { 'fallback' }
+        $isLive = [bool]$online["tatami/$key"]
+        if ($isLive) {
+            $cur.offSince = $null
+            if ($cur.mode -eq 'autoended') {
+                $cur.mode = $null; $cur.pid = $null
+                Log "key $key -> screen $t : input back after auto-end -> resuming"
+            }
+            $desired = 'live'
+        }
+        else {
+            if (-not $cur.offSince) { $cur.offSince = Get-Date }
+            $down = [int]((Get-Date) - $cur.offSince).TotalSeconds
+            if ($cur.mode -eq 'autoended') {
+                $desired = 'autoended'   # stay ended until the input returns
+            }
+            elseif ($AutoEndSec -gt 0 -and $down -ge $AutoEndSec) {
+                $desired = 'autoended'
+            }
+            else {
+                $desired = 'fallback'
+            }
+        }
+
+        if ($desired -eq 'autoended') {
+            if ($alive) {
+                Stop-Process -Id $cur.pid -Force -ErrorAction SilentlyContinue
+                Log "key $key -> screen $t : input down $down-s >= $AutoEndSec-s -> auto-END; broadcast/$t offline (platforms end)"
+            }
+            $cur.mode = 'autoended'
+            $cur.pid  = $null
+            continue
+        }
 
         if ((-not $alive) -or ($cur.mode -ne $desired)) {
             if ($alive) { Stop-Process -Id $cur.pid -Force -ErrorAction SilentlyContinue }

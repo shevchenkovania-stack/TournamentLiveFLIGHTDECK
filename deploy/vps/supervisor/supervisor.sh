@@ -5,8 +5,13 @@
 #   Screen N (internally the letter a..h = screens 1..8) shows EXACTLY what
 #   arrives on key N: rtmp://<host>:1935/tatami/ + key N. Nothing to route,
 #   nothing to claim - the operator reads key N off the card of screen N.
-#     key N online   -> feed broadcast/<letter> from tatami/<N>
-#     key N offline  -> loop that screen's fallback clip
+#   key N online   -> feed broadcast/<letter> from tatami/<N>
+#   key N offline  -> loop that screen's fallback clip
+#   key N offline for AUTOEND_SEC (default 3600 = 1h) with no live input at all
+#     -> AUTO-END the screen: stop feeding broadcast/<letter>, so the platforms
+#     finish and show 'broadcast ended' (same as operator END, but automatic).
+#     The input coming back releases the auto-end and the stream resumes by
+#     itself; RESUME in the cockpit also releases it immediately.
 #   The "tatami / tournament" name is a free-text label in the panel only;
 #   the infrastructure never depends on it (ten mats may all be called "A").
 # Platforms (VK/YouTube) read broadcast/<x>, so the outbound publication
@@ -28,6 +33,9 @@ PASS_="${MTX_ADMIN_PASSWORD:-admin_password_CHANGE_ME}"
 TATAMIS="${TATAMIS:-a b c d e f g h}"
 FDIR="${FALLBACK_DIR:-/fallback}"
 INT="${INTERVAL_SEC:-2}"
+# Continuous input outage that ends the broadcast automatically (seconds).
+# 0 disables auto-end (fallback keeps looping forever, like before).
+AUTOEND_SEC="${AUTOEND_SEC:-3600}"
 INTENT_DIR="${INTENT_DIR:-/control}"
 # Active screen count: screens.conf NEXT TO the outputs file (panel writes it
 # via ctl.py POST /screens). The rig starts small (default 2) and grows by the
@@ -58,6 +66,13 @@ intent_of() { if [ -f "$INTENT_DIR/$1" ]; then cat "$INTENT_DIR/$1"; else echo h
 
 # Screen letter -> its number (a=1 .. h=8). The ingest key operators use.
 no_of() { printf '%s' "$1" | tr 'abcdefgh' '12345678'; }
+
+# Auto-end bookkeeping:
+#   <INTENT_DIR>/<letter>.autoend  - marker: the END came from the supervisor,
+#     not the operator (kept next to the intent files ctl.py already serves).
+#   <STATE_DIR>/<letter>.off       - epoch since when the input is continuously down.
+autoend_mark() { printf '%s/%s.autoend' "$INTENT_DIR" "$1"; }
+off_file()     { printf '%s/%s.off'    "$STATE_DIR"  "$1"; }
 
 # ---- Panel status publishing -------------------------------------------------
 # Publish/overwrite <INTENT_DIR>/<letter>.state with what the panel needs and
@@ -168,6 +183,7 @@ while :; do
         echo "" > "$(mode_file "$s")"
         log "screen/$s (key $n): deactivated (count=$CNT)"
       fi
+      rm -f "$(off_file "$s")"   # dormant screen: outage clock must not age
       pub_state "$s" "" "off"
       continue
     fi
@@ -176,21 +192,59 @@ while :; do
     # not we go on to feed anything (the panel's input badge reads it).
     if is_online "tatami/$n"; then on=1; else on=0; fi
 
+    # Continuous-outage clock for the auto-end: start it when the key goes
+    # down, clear it the moment the key is back.
+    off_f="$(off_file "$s")"
+    if [ "$on" = 1 ]; then
+      rm -f "$off_f"
+    else
+      [ -f "$off_f" ] || date +%s > "$off_f"
+    fi
+
     if [ "$(intent_of "$s")" = ended ]; then
-      # Graceful end: stop feeding broadcast/<s> so the relay closes its
-      # platform connection and the platform shows 'broadcast ended'.
-      if alive "$s"; then
-        kill "$(cat "$(pid_file "$s")")" 2>/dev/null
-        echo "" > "$(mode_file "$s")"
-        log "screen/$s (key $n): operator END -> broadcast/$s taken offline (platform ends)"
+      if [ -f "$(autoend_mark "$s")" ] && [ "$on" = 1 ]; then
+        # Input came back after an auto-END: release it and resume normally.
+        rm -f "$(autoend_mark "$s")" "$INTENT_DIR/$s"
+        log "screen/$s (key $n): input back after auto-END -> resuming"
+      else
+        # Graceful end: stop feeding broadcast/<s> so the relay closes its
+        # platform connection and the platform shows 'broadcast ended'.
+        if alive "$s"; then
+          kill "$(cat "$(pid_file "$s")")" 2>/dev/null
+          echo "" > "$(mode_file "$s")"
+          log "screen/$s (key $n): END -> broadcast/$s taken offline (platform ends)"
+        fi
+        pub_state "$s" "$on" "ended"
+        continue
       fi
-      pub_state "$s" "$on" "ended"
-      continue
     fi
 
     if [ "$on" = 1 ]; then
       want="live:$n"
     else
+      # Operator pressed RESUME after an auto-END (intent is 'hold' again):
+      # forget the auto-end and give the screen a fresh full grace period,
+      # otherwise it would be re-ended on the very next tick.
+      if [ -f "$(autoend_mark "$s")" ]; then
+        rm -f "$(autoend_mark "$s")"
+        date +%s > "$off_f"
+        log "screen/$s (key $n): operator RESUME after auto-END -> fallback again for ${AUTOEND_SEC}s"
+      fi
+      down=$(( $(date +%s) - $(cat "$off_f" 2>/dev/null || date +%s) ))
+      if [ "$AUTOEND_SEC" -gt 0 ] && [ "$down" -ge "$AUTOEND_SEC" ]; then
+        # No live input for the whole grace period: end the broadcast by
+        # itself instead of looping the заставка forever. Marked in the intent
+        # dir, so the cockpit shows the same 'ended' state as a manual END.
+        echo ended > "$INTENT_DIR/$s"
+        echo 1 > "$(autoend_mark "$s")"
+        if alive "$s"; then
+          kill "$(cat "$(pid_file "$s")")" 2>/dev/null
+          echo "" > "$(mode_file "$s")"
+        fi
+        pub_state "$s" "$on" "ended"
+        log "screen/$s (key $n): input down ${down}s >= ${AUTOEND_SEC}s -> auto-END (platform broadcast stopped)"
+        continue
+      fi
       fb="fallback_$s.mp4"
       [ -f "$FDIR/$fb" ] || fb="fallback_a.mp4"
       want="fallback:$fb"
